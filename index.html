@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>أكاديمية أمجاد | لوحة الإدارة الشاملة</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#0B1B33">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root{
+  --ink:#0B1B33; --ink-2:#132C56; --gold:#C9A227; --gold-light:#E9CE86;
+  --paper:#F8F4E9; --paper2:#F1EAD6; --muted:#5B6577; --gold-dim:#8A7431;
+}
+:root.dark{
+  --paper:#12161F; --paper2:#1A2030; --muted:#9AA3B5; --ink-text:#E8ECF4;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Tahoma, Arial, sans-serif; background:var(--paper); color:var(--ink-text,#1C2430); padding-bottom:100px; transition:background .2s;}
+.dark .card, .dark .student-row, .dark .stats-section, .dark .stat-card, .dark .faq-item, .dark .modal, .dark .t-card, .dark .service-card{background:#1A2030; border-color:#2A3245; color:#E8ECF4;}
+.dark .field-input, .dark .search-input{background:#1A2030; border-color:#2A3245; color:#E8ECF4;}
+.header{background:linear-gradient(135deg, var(--ink), var(--ink-2)); padding:18px 16px; color:#fff; position:sticky; top:0; z-index:40;}
+.header-top{display:flex; justify-content:space-between; align-items:center;}
+.brand-name{font-size:18px; font-weight:800;}
+.brand-sub{font-size:12px; color:var(--gold-light); margin-top:1px;}
+.header-actions{display:flex; align-items:center; gap:6px;}
+.icon-btn2{background:rgba(255,255,255,0.1); border:none; color:#fff; font-size:16px; width:34px; height:34px; border-radius:9px; cursor:pointer;}
+.save-flag{font-size:10px; color:var(--gold-light); opacity:0; transition:opacity .3s;}
+.save-flag.show{opacity:1;}
+.cloud-status{font-size:10px; color:#8E97A8;}
+.search-bar-wrap{margin-top:12px; position:relative;}
+.global-search{width:100%; padding:11px 14px; border-radius:10px; border:none; font-size:13.5px; font-family:inherit; background:rgba(255,255,255,0.12); color:#fff;}
+.global-search::placeholder{color:#B9C2D3;}
+.search-results{position:absolute; top:44px; right:0; left:0; background:#fff; border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,0.3); max-height:340px; overflow-y:auto; z-index:60;}
+.dark .search-results{background:#1A2030;}
+.sr-item{padding:12px 14px; border-bottom:1px solid #eee; cursor:pointer; color:#1C2430;}
+.dark .sr-item{color:#E8ECF4; border-color:#2A3245;}
+.sr-item b{display:block; font-size:14px;}
+.sr-item span{font-size:11.5px; color:var(--muted);}
+.tabs{margin-top:14px; display:flex; gap:5px; overflow-x:auto; -webkit-overflow-scrolling:touch;}
+.tab-btn{flex:0 0 auto; padding:9px 9px; border-radius:10px; border:none; cursor:pointer; font-size:11.5px; font-weight:700; background:rgba(255,255,255,0.08); color:#D6DCE8; font-family:inherit; white-space:nowrap;}
+.tab-btn.active{background:linear-gradient(90deg,var(--gold-light),var(--gold)); color:var(--ink);}
+.container{max-width:640px; margin:0 auto; padding:18px 14px;}
+.empty{text-align:center; padding:60px 20px; color:var(--muted);}
+.card{background:#fff; border-radius:14px; margin-bottom:12px; border:1.5px solid #E7DFC7; box-shadow:0 8px 24px rgba(11,27,51,0.06); overflow:hidden;}
+.card.now{border-color:var(--gold);} .card.soon{border-color:var(--gold-light);} .card.done{opacity:.6;}
+.card-row{display:flex; align-items:center; padding:14px 16px; gap:12px;}
+.check-circle{width:28px; height:28px; border-radius:50%; flex-shrink:0; cursor:pointer; border:2px solid #D6CCA6; background:transparent; display:flex; align-items:center; justify-content:center; font-size:14px; color:#fff;}
+.check-circle.done{background:var(--gold); border-color:var(--gold);}
+.card-info{flex:1; min-width:0; cursor:pointer;}
+.card-name{font-weight:700; font-size:15px;}
+.card-name.done{text-decoration:line-through;}
+.card-sub{font-size:12.5px; color:var(--muted); margin-top:2px;}
+.card-time{display:flex; align-items:center; gap:4px; font-size:13px; font-weight:700; background:var(--paper2); padding:6px 10px; border-radius:8px; white-space:nowrap;}
+.card-time.now{color:#B8391A; background:#FCE9E3;}
+.flag-now{background:#FCE9E3; color:#B8391A; font-size:12px; font-weight:700; padding:6px 16px;}
+.flag-soon{background:rgba(201,162,39,0.12); color:var(--gold); font-size:12px; font-weight:700; padding:6px 16px;}
+.student-row{background:#fff; border-radius:12px; padding:14px 16px; margin-bottom:10px; border:1px solid #E7DFC7; display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+.student-row .info{flex:1; cursor:pointer;}
+.student-row .name{font-weight:700; font-size:14.5px;}
+.student-row .meta{font-size:12px; color:var(--muted); margin-top:3px;}
+.icon-btn{background:none; border:none; cursor:pointer; color:#B8391A; padding:4px; font-size:15px;}
+.btn-outline{font-size:12px; padding:6px 12px; border-radius:7px; border:1px solid var(--gold); background:transparent; color:var(--gold); font-weight:700; cursor:pointer; font-family:inherit;}
+.status-badge{font-size:10.5px; font-weight:700; padding:3px 8px; border-radius:20px; white-space:nowrap;}
+.status-active{background:#E3F2E9; color:#1F7A4D;} .status-new{background:rgba(201,162,39,0.15); color:var(--gold-dim);} .status-paused{background:#F3E4E4; color:#B8391A;}
+.search-input{width:100%; padding:11px 14px; border-radius:10px; border:1px solid #E0DAC8; margin-bottom:12px; font-size:13.5px; font-family:inherit;}
+.fab{position:fixed; bottom:22px; left:22px; width:54px; height:54px; border-radius:50%; background:linear-gradient(135deg,var(--gold-light),var(--gold)); border:none; box-shadow:0 10px 28px rgba(201,162,39,0.45); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:24px; color:var(--ink); z-index:20;}
+.modal-overlay{position:fixed; inset:0; background:rgba(11,27,51,0.6); display:flex; align-items:flex-end; justify-content:center; z-index:80;}
+.modal{background:#fff; border-radius:18px 18px 0 0; width:100%; max-width:480px; padding:20px; max-height:88vh; overflow-y:auto;}
+.modal-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;}
+.modal-title{font-weight:800; font-size:16px;}
+.close-btn{background:none; border:none; font-size:20px; color:var(--muted); cursor:pointer;}
+.field-label{font-size:12px; font-weight:700; color:var(--muted); display:block; margin-bottom:5px; margin-top:10px;}
+.field-input{width:100%; padding:10px 12px; border-radius:9px; border:1px solid #E0DAC8; font-size:13.5px; font-family:inherit;}
+.field-row{display:flex; gap:8px;} .field-row>div{flex:1;}
+.submit-btn{width:100%; padding:13px; border-radius:10px; border:none; cursor:pointer; background:linear-gradient(90deg,var(--gold-light),var(--gold)); color:var(--ink); font-weight:800; font-size:14px; margin-top:16px; font-family:inherit;}
+.section-title{font-size:12px; font-weight:800; margin:16px 0 6px; padding-top:12px; border-top:1px solid #F0EAD6; color:var(--ink-text,#1C2430);}
+.section-title:first-of-type{border-top:none; padding-top:0; margin-top:0;}
+.add-row-btn{width:100%; padding:9px; border-radius:8px; border:1.5px dashed var(--gold); background:rgba(201,162,39,0.06); color:var(--gold-dim); font-size:12.5px; font-weight:700; cursor:pointer; font-family:inherit; margin:8px 0;}
+.row-remove{width:32px; height:32px; flex-shrink:0; border-radius:8px; border:1px solid #E7C9C9; background:#FCE9E3; color:#B8391A; font-size:14px; cursor:pointer;}
+.schedule-row{display:flex; gap:6px; align-items:center; margin-bottom:6px;}
+.schedule-row select, .schedule-row input{flex:1; padding:9px; border-radius:8px; border:1px solid #E0DAC8; font-size:13px; font-family:inherit;}
+.custom-field-row{display:flex; gap:6px; margin-bottom:6px;}
+.custom-field-row input{flex:1; padding:9px; border-radius:8px; border:1px solid #E0DAC8; font-size:13px; font-family:inherit;}
+.toast{position:fixed; bottom:90px; right:50%; transform:translateX(50%); background:var(--ink); color:var(--gold-light); padding:9px 18px; border-radius:20px; font-size:12.5px; opacity:0; transition:opacity .3s; z-index:90;}
+.toast.show{opacity:1;}
+.schedule-pill{display:inline-block; font-size:11px; background:var(--paper2); padding:3px 8px; border-radius:20px; margin:2px 3px 2px 0; font-weight:600;}
+/* profile page */
+.profile-header{background:linear-gradient(135deg,var(--ink),var(--ink-2)); color:#fff; padding:24px 18px; border-radius:0 0 20px 20px; margin:-18px -14px 16px;}
+.profile-back{background:none; border:none; color:#fff; font-size:14px; cursor:pointer; margin-bottom:14px; font-family:inherit;}
+.profile-top{display:flex; align-items:center; gap:14px;}
+.profile-photo{width:64px; height:64px; border-radius:50%; object-fit:cover; border:2px solid var(--gold); background:rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:center; font-size:24px; cursor:pointer;}
+.profile-name{font-size:19px; font-weight:800;}
+.profile-meta{font-size:12.5px; color:#C9D0DE; margin-top:3px;}
+.profile-actions{display:flex; gap:8px; margin-top:16px; flex-wrap:wrap;}
+.profile-action-btn{flex:1; min-width:90px; background:rgba(255,255,255,0.1); border:1px solid rgba(201,162,39,0.4); color:#fff; padding:8px; border-radius:9px; font-size:11.5px; font-weight:700; cursor:pointer; font-family:inherit; text-align:center;}
+.package-card{background:#fff; border:1.5px solid #E7DFC7; border-radius:14px; padding:16px; margin-bottom:14px;}
+.package-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px;}
+.package-title{font-size:15px; font-weight:800;}
+.package-sub{font-size:12px; color:var(--muted); margin-top:2px;}
+.pay-badge{font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px;}
+.pay-paid{background:#E3F2E9; color:#1F7A4D;} .pay-unpaid{background:#F3E4E4; color:#B8391A;}
+.progress-bar{height:8px; background:var(--paper2); border-radius:6px; overflow:hidden; margin:10px 0;}
+.progress-fill{height:100%; background:linear-gradient(90deg,var(--gold-light),var(--gold));}
+.session-list{display:flex; flex-wrap:wrap; gap:6px; margin:10px 0;}
+.session-chip{width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; cursor:pointer; border:1.5px solid #E0DAC8; background:#fff;}
+.session-chip.attended{background:#1F7A4D; color:#fff; border-color:#1F7A4D;}
+.session-chip.absent{background:#B8391A; color:#fff; border-color:#B8391A;}
+.package-footer{display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;}
+.renew-warning{margin-top:10px; background:rgba(201,162,39,0.12); color:var(--gold-dim); font-size:12px; font-weight:700; padding:8px 12px; border-radius:8px;}
+.cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-top:10px;}
+.cal-day{aspect-ratio:1; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:700; background:var(--paper2); color:var(--muted);}
+.cal-day.attended{background:#3FA66A; color:#fff;}
+.cal-day.absent{background:#C24A3A; color:#fff;}
+.cal-day.empty{background:transparent;}
+.cal-legend{display:flex; gap:14px; margin-top:8px; font-size:11px; color:var(--muted);}
+.cal-legend span{display:inline-flex; align-items:center; gap:4px;}
+.cal-dot{width:10px; height:10px; border-radius:3px; display:inline-block;}
+.salary-banner{background:linear-gradient(90deg,var(--gold-light),var(--gold)); color:var(--ink); padding:12px 16px; border-radius:12px; font-size:13px; font-weight:700; margin-bottom:14px;}
+.compare-row{display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #F0EAD6; font-size:13.5px;}
+.compare-up{color:#1F7A4D; font-weight:800;}
+.compare-down{color:#B8391A; font-weight:800;}
+.mini-btn{font-size:11.5px; padding:7px 12px; border-radius:8px; border:1px solid var(--gold); background:transparent; color:var(--gold-dim); font-weight:700; cursor:pointer; font-family:inherit;}
+.mini-btn.filled{background:var(--gold); color:#fff; border-color:var(--gold);}
+.receipt-thumb{width:52px; height:52px; border-radius:8px; object-fit:cover; border:1px solid #E0DAC8;}
+@media print{
+  .header, .fab, .tabs, .profile-action-btn, .icon-btn, .btn-outline, .mini-btn{display:none !important;}
+  body{padding-bottom:0;}
+  body.printing-backup .container, body.printing-backup .header{display:none !important;}
+  body.printing-backup #fullBackupPrint{display:block !important;}
+}
+#fullBackupPrint{padding:20px;color:#000;background:#fff;direction:rtl;}
+</style>
+</head>
+<body>
+
+<div id="lockScreen" style="position:fixed;inset:0;background:linear-gradient(135deg,#0B1B33,#132C56);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
+  <img src="icon-192.png" style="width:90px;height:90px;border-radius:50%;box-shadow:0 0 0 3px #C9A227;margin-bottom:20px;">
+  <div style="color:#fff;font-size:19px;font-weight:800;margin-bottom:6px;">أكاديمية أمجاد</div>
+  <div style="color:#C9D0DE;font-size:13px;margin-bottom:24px;">البرنامج ده خاص — من فضلك ادخل كلمة السر</div>
+  <input type="password" id="lockPassInput" placeholder="كلمة السر" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:1px solid #3a4d70;background:#132C56;color:#fff;font-size:15px;text-align:center;margin-bottom:14px;">
+  <button id="lockSubmitBtn" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:none;background:linear-gradient(90deg,#E9CE86,#C9A227);color:#0B1B33;font-weight:800;font-size:15px;cursor:pointer;">دخول</button>
+  <div id="lockError" style="color:#E9A08A;font-size:12.5px;margin-top:12px;display:none;">كلمة السر غلط، جرب تاني</div>
+</div>
+
+<div id="notifBanner" style="display:none; position:fixed; top:0; right:0; left:0; background:var(--gold); color:var(--ink); text-align:center; padding:9px; font-size:12.5px; font-weight:700; cursor:pointer; z-index:60;">🔔 فعّل الإشعارات — دوس هنا</div>
+
+<div class="header">
+  <div class="header-top">
+    <div>
+      <div class="brand-name">أكاديمية أمجاد</div>
+      <div class="brand-sub" id="cloudStatus">☁️ ...</div>
+    </div>
+    <div class="header-actions">
+      <div id="saveFlag" class="save-flag">✓ حُفظ</div>
+      <button class="icon-btn2" id="darkToggle">🌙</button>
+      <button class="icon-btn2" id="settingsBtn">⚙️</button>
+    </div>
+  </div>
+  <div class="search-bar-wrap">
+    <input class="global-search" id="globalSearch" placeholder="🔍 دور على طالب أو معلم من أي مكان...">
+    <div id="searchResults"></div>
+  </div>
+  <div class="tabs" id="tabsBar">
+    <button class="tab-btn active" data-tab="today" id="todayTabBtn"></button>
+    <button class="tab-btn" data-tab="students">👥 الطلاب</button>
+    <button class="tab-btn" data-tab="finance">💰 المالية</button>
+    <button class="tab-btn" data-tab="bookings" id="bookingsTabBtn">📅 الحجوزات</button>
+    <button class="tab-btn" id="moreTabBtn">⋯ المزيد</button>
+  </div>
+  <div id="moreMenuRoot"></div>
+</div>
+
+<div class="container" id="container"></div>
+<button class="fab" id="fabAdd">+</button>
+<div id="modalRoot"></div>
+<div id="settingsMenuRoot"></div>
+<div id="fullBackupPrint" style="display:none;"></div>
+<input type="file" id="importFile" accept="application/json" style="display:none;">
+<input type="file" id="photoInput" accept="image/*" style="display:none;">
+<div id="toast" class="toast"></div>
+
+<script>
+const DAYS=['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+const DAY_KEYS=['sun','mon','tue','wed','thu','fri','sat'];
+const CURRENCIES=['EGP','SAR','AED','KWD','QAR','BHD','OMR','USD'];
+const CURRENCY_LABELS={EGP:'جنيه مصري',SAR:'ريال سعودي',AED:'درهم إماراتي',KWD:'دينار كويتي',QAR:'ريال قطري',BHD:'دينار بحريني',OMR:'ريال عماني',USD:'دولار'};
+
+function todayKey(){return DAY_KEYS[new Date().getDay()];}
+function todayLabel(){return DAYS[new Date().getDay()];}
+function dateStr(){return new Date().toISOString().slice(0,10);}
+function toMinutes(t){const [h,m]=t.split(':').map(Number);return h*60+m;}
+function escapeHtml(str){const d=document.createElement('div');d.textContent=str||'';return d.innerHTML;}
+function uid(){return Date.now().toString()+Math.random().toString(36).slice(2,6);}
+
+// ---------- Supabase ----------
+const SUPABASE_URL='https://llihyttknmmnfknmjhhv.supabase.co';
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxsaWh5dHRrbm1tbmZrbm1qaGh2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU2ODU5MjIsImV4cCI6MjEwMTI2MTkyMn0.dNfK_gvRSYaQ7IUO-qrEmodn0wbbEMKmGIu5x2bAS-w';
+let supabaseClient=null;
+try{ if(window.supabase && window.supabase.createClient){ supabaseClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY); } }catch(e){console.error(e);}
+let cloudOnline=false;
+
+let students=JSON.parse(localStorage.getItem('amjad_students')||'[]');
+let transactions=JSON.parse(localStorage.getItem('amjad_transactions')||'[]');
+let teachers=JSON.parse(localStorage.getItem('amjad_teachers')||'[]');
+let bookings=JSON.parse(localStorage.getItem('amjad_bookings')||'[]');
+let seenBookingIds=new Set(JSON.parse(localStorage.getItem('amjad_seen_bookings')||'null')||bookings.map(b=>b.id));
+let notes=JSON.parse(localStorage.getItem('amjad_notes_'+dateStr())||'{}');
+let completed=JSON.parse(localStorage.getItem('amjad_completed_'+dateStr())||'{}');
+
+function migrateStudent(s){
+  if(!s.schedule||!Array.isArray(s.schedule)) s.schedule=(s.day&&s.time)?[{day:s.day,time:s.time}]:[];
+  if(!s.customFields||!Array.isArray(s.customFields)) s.customFields=[];
+  if(!s.packages||!Array.isArray(s.packages)) s.packages=[];
+  if(!s.photo) s.photo='';
+  return s;
+}
+students=students.map(migrateStudent);
+
+// dark mode
+if(localStorage.getItem('amjad_dark')==='1') document.documentElement.classList.add('dark');
+document.getElementById('darkToggle').addEventListener('click',()=>{
+  document.documentElement.classList.toggle('dark');
+  localStorage.setItem('amjad_dark', document.documentElement.classList.contains('dark')?'1':'0');
+});
+
+function saveStudents(){ localStorage.setItem('amjad_students',JSON.stringify(students)); flashSave(); syncStudentsToCloud(); }
+function saveTransactions(){ localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); flashSave(); syncTransactionsToCloud(); }
+function saveTeachers(){ localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); flashSave(); syncTeachersToCloud(); }
+function saveCompleted(){ localStorage.setItem('amjad_completed_'+dateStr(),JSON.stringify(completed)); }
+function saveNotes(){ localStorage.setItem('amjad_notes_'+dateStr(),JSON.stringify(notes)); flashSave(); }
+function flashSave(){ const el=document.getElementById('saveFlag'); el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1200); }
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?'☁️ متصل':'⚠️ غير متصل (محلي)'; el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
+
+async function syncStudentsToCloud(){
+  if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
+  try{
+    if(students.length){ const {error}=await supabaseClient.from('students').upsert(students,{onConflict:'id'}); if(error)throw error; }
+    const {data:remote,error:fe}=await supabaseClient.from('students').select('id');
+    if(!fe&&remote){ const ids=new Set(students.map(s=>s.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('students').delete().in('id',del); }
+    cloudOnline=true;
+  }catch(e){ cloudOnline=false; console.error('sync students failed, remote untouched',e); }
+  updateCloudStatus();
+}
+async function syncTransactionsToCloud(){
+  if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
+  try{
+    if(transactions.length){ const {error}=await supabaseClient.from('transactions').upsert(transactions,{onConflict:'id'}); if(error)throw error; }
+    const {data:remote,error:fe}=await supabaseClient.from('transactions').select('id');
+    if(!fe&&remote){ const ids=new Set(transactions.map(t=>t.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('transactions').delete().in('id',del); }
+    cloudOnline=true;
+  }catch(e){ cloudOnline=false; console.error('sync tx failed',e); }
+  updateCloudStatus();
+}
+async function syncTeachersToCloud(){
+  if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
+  try{
+    if(teachers.length){ const {error}=await supabaseClient.from('teachers').upsert(teachers,{onConflict:'id'}); if(error)throw error; }
+    const {data:remote,error:fe}=await supabaseClient.from('teachers').select('id');
+    if(!fe&&remote){ const ids=new Set(teachers.map(t=>t.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('teachers').delete().in('id',del); }
+    cloudOnline=true;
+  }catch(e){ cloudOnline=false; console.error('sync teachers failed',e); }
+  updateCloudStatus();
+}
+function saveBookings(){
+  localStorage.setItem('amjad_bookings',JSON.stringify(bookings));
+  flashSave();
+  syncBookingsToCloud();
+}
+async function syncBookingsToCloud(){
+  if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
+  try{
+    if(bookings.length){ const {error}=await supabaseClient.from('bookings').upsert(bookings,{onConflict:'id'}); if(error)throw error; }
+    const {data:remote,error:fe}=await supabaseClient.from('bookings').select('id');
+    if(!fe&&remote){ const ids=new Set(bookings.map(b=>b.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('bookings').delete().in('id',del); }
+    cloudOnline=true;
+  }catch(e){ cloudOnline=false; console.error('sync bookings failed',e); }
+  updateCloudStatus();
+}
+async function loadFromCloud(){
+  if(!supabaseClient){cloudOnline=false;updateCloudStatus();render();return;}
+  try{
+    const [sr,tr,tcr,br]=await Promise.all([
+      supabaseClient.from('students').select('*'),
+      supabaseClient.from('transactions').select('*'),
+      supabaseClient.from('teachers').select('*'),
+      supabaseClient.from('bookings').select('*'),
+    ]);
+    if(sr.error) throw sr.error;
+    if(tr.error) throw tr.error;
+    const cloudStudents=(sr.data||[]).map(migrateStudent);
+    const cloudTx=tr.data||[];
+    const cloudTeachers=tcr.error?null:(tcr.data||[]);
+    const cloudBookings=br.error?null:(br.data||[]);
+    let needsResync=false;
+    const studentsLostData = students.some(localS=>{
+      const cloudS = cloudStudents.find(cs=>cs.id===localS.id);
+      if(!cloudS) return true;
+      const localPkgCount = (localS.packages||[]).length;
+      const cloudPkgCount = (cloudS.packages||[]).length;
+      return cloudPkgCount < localPkgCount;
+    });
+    if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));}
+    if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));}
+    if(cloudTeachers!==null){ if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers));} }
+    if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings));} }
+    cloudOnline=true;
+    if(needsResync){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
+  }catch(e){ cloudOnline=false; console.error('cloud load failed',e); }
+  updateCloudStatus();
+  render();
+}
+
+let currentTab='today';
+let currentView='tabs'; // 'tabs' | 'profile'
+let profileStudentId=null;
+let expandedId=null;
+let editingId=null;
+let notifiedFlags={};
+let searchQuery='';
+let statusFilter='all';
+let finTypeFilter='all';
+let lastCurrency=localStorage.getItem('amjad_last_currency')||'EGP';
+
+document.getElementById('todayTabBtn').textContent='اليوم ('+todayLabel()+')';
+
+// ---------- image resize helper ----------
+function resizeImage(file, maxW, cb){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      const scale=Math.min(1, maxW/img.width);
+      const canvas=document.createElement('canvas');
+      canvas.width=img.width*scale; canvas.height=img.height*scale;
+      canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+      cb(canvas.toDataURL('image/jpeg',0.7));
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ---------- tabs ----------
+document.querySelectorAll('.tab-btn[data-tab]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    currentView='tabs'; currentTab=btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('moreMenuRoot').innerHTML='';
+    render();
+  });
+});
+
+const MORE_TABS = [
+  {key:'teachers', label:'👨‍🏫 المعلمين'},
+  {key:'week', label:'📆 الأسبوع'},
+  {key:'stats', label:'📊 إحصائيات'},
+];
+document.getElementById('moreTabBtn').addEventListener('click',(e)=>{
+  e.stopPropagation();
+  const root = document.getElementById('moreMenuRoot');
+  if(root.innerHTML){ root.innerHTML=''; return; }
+  root.innerHTML = `<div id="moreMenu" style="position:fixed;top:150px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:85;overflow:hidden;min-width:170px;">
+    ${MORE_TABS.map(t=>`<div class="more-item" data-more="${t.key}" style="padding:13px 16px;font-size:14px;cursor:pointer;border-bottom:1px solid #eee;color:#0B1B33;">${t.label}</div>`).join('')}
+  </div>`;
+  root.querySelectorAll('[data-more]').forEach(item=>item.addEventListener('click',()=>{
+    currentView='tabs'; currentTab=item.dataset.more;
+    document.querySelectorAll('.tab-btn[data-tab]').forEach(b=>b.classList.remove('active'));
+    document.getElementById('moreTabBtn').classList.add('active');
+    root.innerHTML='';
+    render();
+  }));
+  setTimeout(()=>document.addEventListener('click',function closeMore(e2){
+    if(!e2.target.closest('#moreMenu') && e2.target.id!=='moreTabBtn'){ root.innerHTML=''; document.removeEventListener('click',closeMore); }
+  }),10);
+});
+
+function render(){
+  const c=document.getElementById('container');
+  c.innerHTML='';
+  const fab=document.getElementById('fabAdd');
+  const tabsBar=document.getElementById('tabsBar');
+  if(currentView==='profile'){
+    tabsBar.style.display='none';
+    fab.style.display='none';
+    document.getElementById('moreMenuRoot').innerHTML='';
+    renderProfile(c);
+    return;
+  }
+  tabsBar.style.display='flex';
+  fab.style.display = (currentTab==='stats'||currentTab==='week') ? 'none' : 'flex';
+  const pendingCount = bookings.filter(b=>b.status==='pending').length;
+  const bkBtn = document.getElementById('bookingsTabBtn');
+  if(bkBtn) bkBtn.innerHTML = `📅 الحجوزات${pendingCount>0?` <span style="background:#B8391A;color:#fff;border-radius:10px;padding:1px 6px;font-size:10.5px;">${pendingCount}</span>`:''}`;
+  if(currentTab==='today') renderToday(c);
+  else if(currentTab==='students') renderStudents(c);
+  else if(currentTab==='teachers') renderTeachers(c);
+  else if(currentTab==='finance') renderFinance(c);
+  else if(currentTab==='bookings') renderBookings(c);
+  else if(currentTab==='stats') renderStats(c);
+  else renderWeek(c);
+}
+
+// ---------- global search ----------
+const searchInput=document.getElementById('globalSearch');
+searchInput.addEventListener('input',()=>{
+  const q=searchInput.value.trim();
+  const box=document.getElementById('searchResults');
+  if(!q){ box.innerHTML=''; return; }
+  const matches=[];
+  students.forEach(s=>{ if(s.name.includes(q)||((s.parentName||'').includes(q))) matches.push({type:'student',obj:s}); });
+  teachers.forEach(t=>{ if(t.name.includes(q)) matches.push({type:'teacher',obj:t}); });
+  if(matches.length===0){ box.innerHTML='<div class="search-results"><div class="sr-item">مفيش نتايج</div></div>'; return; }
+  box.innerHTML='<div class="search-results">'+matches.slice(0,8).map((m,i)=>`
+    <div class="sr-item" data-idx="${i}">
+      <b>${escapeHtml(m.obj.name)}</b>
+      <span>${m.type==='student'?'طالب':'معلم'}</span>
+    </div>`).join('')+'</div>';
+  box.querySelectorAll('.sr-item[data-idx]').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const m=matches[Number(el.dataset.idx)];
+      searchInput.value=''; box.innerHTML='';
+      if(m.type==='student') openProfile(m.obj.id);
+      else { currentView='tabs'; currentTab='teachers'; document.querySelectorAll('.tab-btn[data-tab]').forEach(b=>b.classList.remove('active')); document.getElementById('moreTabBtn').classList.add('active'); render(); }
+    });
+  });
+});
+
+// ---------- TODAY ----------
+function renderToday(c){
+  const sessions=[];
+  students.forEach(s=>{ (s.schedule||[]).forEach(slot=>{ if(slot.day===todayKey()) sessions.push({student:s,time:slot.time,key:s.id+'_'+slot.time}); }); });
+  sessions.sort((a,b)=>a.time.localeCompare(b.time));
+  if(sessions.length===0){ c.innerHTML='<div class="empty">📅<br><br>مفيش حصص مجدولة النهاردة</div>'; return; }
+  const now=new Date().getHours()*60+new Date().getMinutes();
+  sessions.forEach(sess=>{
+    const s=sess.student, key=sess.key;
+    const isDone=!!completed[key];
+    const diff=toMinutes(sess.time)-now;
+    const notifyBefore=Number(s.notifyBefore||10);
+    const isSoon=diff>0&&diff<=notifyBefore;
+    const isNow=diff<=0&&diff>-60&&!isDone;
+    const card=document.createElement('div');
+    card.className='card'+(isNow?' now':isSoon?' soon':'')+(isDone?' done':'');
+    const activePkg=(s.packages||[]).find(p=>p.active&&p.whatsappGroup);
+    card.innerHTML=`
+      <div class="card-row">
+        <button class="check-circle ${isDone?'done':''}" data-check="${key}">${isDone?'✓':''}</button>
+        <div class="card-info" data-open="${s.id}">
+          <div class="card-name ${isDone?'done':''}">${escapeHtml(s.name)}</div>
+          <div class="card-sub">${escapeHtml(s.subject||'بدون مادة محددة')}</div>
+        </div>
+        <div class="card-time ${isNow?'now':''}">⏰ ${sess.time}</div>
+      </div>
+      ${isNow?'<div class="flag-now">🔴 موعد الحصة دلوقتي</div>':''}
+      ${isSoon&&!isNow?`<div class="flag-soon">🔔 الحصة قربت — بعد ${diff} دقيقة</div>`:''}
+      ${isSoon&&!isNow&&activePkg?`<div style="padding:0 16px 12px;"><button class="mini-btn filled" data-group-remind="${s.id}" data-diff="${diff}">📲 رسالة تذكير للجروب</button></div>`:''}
+    `;
+    c.appendChild(card);
+    const flagKey=key+'_'+dateStr();
+    if(isSoon&&!notifiedFlags[flagKey]){ notifiedFlags[flagKey]=true; fireNotification('حصة قربت 🔔',`${s.name} بعد ${diff} دقيقة${activePkg?' — رسالة الجروب جاهزة':''}`); }
+  });
+  c.querySelectorAll('[data-check]').forEach(b=>b.addEventListener('click',()=>{ completed[b.dataset.check]=!completed[b.dataset.check]; saveCompleted(); render(); }));
+  c.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openProfile(b.dataset.open)));
+  c.querySelectorAll('[data-group-remind]').forEach(b=>b.addEventListener('click',()=>{
+    const s=students.find(x=>x.id===b.dataset.groupRemind);
+    const pkg=(s.packages||[]).find(p=>p.active&&p.whatsappGroup);
+    if(!pkg) return;
+    const msg=`تذكير من أكاديمية أمجاد 🌙\nحصة "${pkg.subject}" لـ${s.name} هتبدأ بعد ${b.dataset.diff} دقيقة.\nالرجاء الاستعداد 📚`;
+    window.open(pkg.whatsappGroup,'_blank');
+    if(navigator.clipboard){ navigator.clipboard.writeText(msg).catch(()=>{}); }
+    toast('اتنسخت الرسالة — الصقها في الجروب وابعتها');
+  }));
+}
+
+// ---------- STUDENTS ----------
+function renderStudents(c){
+  const searchBar=document.createElement('input');
+  searchBar.className='search-input'; searchBar.placeholder='🔍 دور باسم الطالب أو ولي الأمر...'; searchBar.value=searchQuery;
+  searchBar.addEventListener('input',e=>{ searchQuery=e.target.value; render(); });
+  c.appendChild(searchBar);
+  const chips=document.createElement('div');
+  chips.style.display='flex'; chips.style.gap='8px'; chips.style.marginBottom='12px'; chips.style.flexWrap='wrap';
+  const filters=[['all','الكل'],['new','جديد'],['active','نشط'],['paused','متوقف']];
+  chips.innerHTML=filters.map(([k,l])=>`<button class="btn-outline" style="${statusFilter===k?'background:var(--ink);color:#fff;border-color:var(--ink);':''}" data-filter="${k}">${l}</button>`).join('');
+  c.appendChild(chips);
+  chips.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{ statusFilter=b.dataset.filter; render(); }));
+
+  let filtered=students.filter(s=>{
+    const ms=!searchQuery||s.name.includes(searchQuery)||(s.parentName||'').includes(searchQuery);
+    const mst=statusFilter==='all'||s.status===statusFilter;
+    return ms&&mst;
+  });
+  if(filtered.length===0){ const e=document.createElement('div'); e.className='empty'; e.innerHTML=students.length===0?'👤<br><br>لسه معملتش أي طالب.. دوس + لإضافة أول طالب':'🔍<br><br>مفيش نتايج'; c.appendChild(e); return; }
+  const statusLabel={new:'جديد',active:'نشط',paused:'متوقف'};
+  const statusClass={new:'status-new',active:'status-active',paused:'status-paused'};
+  filtered.forEach(s=>{
+    const row=document.createElement('div');
+    row.className='student-row';
+    const schedHtml=(s.schedule&&s.schedule.length)?s.schedule.map(sl=>`<span class="schedule-pill">${DAYS[DAY_KEYS.indexOf(sl.day)]} ${sl.time}</span>`).join(''):'';
+    const pkgCount=(s.packages||[]).filter(p=>p.active).length;
+    row.innerHTML=`
+      <div class="info" data-open="${s.id}">
+        <div class="name">${escapeHtml(s.name)} ${s.status?`<span class="status-badge ${statusClass[s.status]||''}">${statusLabel[s.status]||''}</span>`:''}</div>
+        <div class="meta">${escapeHtml(s.subject||'')}</div>
+        <div>${schedHtml}</div>
+        ${pkgCount?`<div class="meta">📦 ${pkgCount} باقة نشطة</div>`:''}
+      </div>
+      <button class="btn-outline" data-edit="${s.id}">تعديل سريع</button>
+      <button class="icon-btn" data-del="${s.id}">🗑</button>
+    `;
+    c.appendChild(row);
+  });
+  c.querySelectorAll('[data-open]').forEach(b=>b.addEventListener('click',()=>openProfile(b.dataset.open)));
+  c.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openForm(b.dataset.edit); }));
+  c.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(confirm('متأكد إنك عايز تحذف الطالب ده؟')){ students=students.filter(s=>s.id!==b.dataset.del); saveStudents(); render(); }
+  }));
+}
+
+// ---------- WEEK ----------
+function renderWeek(c){
+  DAY_KEYS.forEach((k,i)=>{
+    const daySessions=[];
+    students.forEach(s=>{ (s.schedule||[]).forEach(slot=>{ if(slot.day===k) daySessions.push({student:s,time:slot.time}); }); });
+    daySessions.sort((a,b)=>a.time.localeCompare(b.time));
+    const isToday=k===todayKey();
+    const block=document.createElement('div');
+    block.style.marginBottom='16px';
+    block.innerHTML=`
+      <div style="font-size:13px;font-weight:800;margin-bottom:8px;${isToday?'color:var(--gold);':''}">${DAYS[i]} ${isToday?'<span style="font-size:10px;background:var(--gold);color:#fff;padding:2px 8px;border-radius:20px;">اليوم</span>':''}</div>
+      ${daySessions.length===0?'<div style="font-size:12px;color:var(--muted);">لا يوجد حصص</div>':daySessions.map(sess=>`
+        <div style="display:flex;gap:10px;background:#fff;border:1px solid #E7DFC7;border-radius:10px;padding:9px 12px;margin-bottom:6px;">
+          <div style="font-size:12px;font-weight:700;background:var(--paper2);padding:3px 9px;border-radius:6px;">${sess.time}</div>
+          <div style="font-size:13px;font-weight:600;">${escapeHtml(sess.student.name)}</div>
+        </div>`).join('')}
+    `;
+    c.appendChild(block);
+  });
+}
+
+// ---------- FORM: quick student edit (basic fields, schedule, custom fields) ----------
+function openForm(id, prefill){
+  editingId=id;
+  const existing=id?students.find(s=>s.id===id):null;
+  const form=existing?JSON.parse(JSON.stringify(existing)):{name:(prefill&&prefill.name)||'',subject:(prefill&&prefill.subject)||'',schedule:[{day:(prefill&&prefill.day)||todayKey(),time:(prefill&&prefill.time)||'16:00'}],notifyBefore:'10',parentName:'',parentPhone:(prefill&&prefill.phone)||'',status:'new',permanentNotes:(prefill&&prefill.notes)||'',customFields:[]};
+  if(!form.schedule||!form.schedule.length) form.schedule=[{day:todayKey(),time:'16:00'}];
+  if(!form.customFields) form.customFields=[];
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`
+    <div class="modal-overlay" id="overlay">
+      <div class="modal" id="modalBox">
+        <div class="modal-head"><div class="modal-title">${id?'تعديل سريع':'إضافة طالب جديد'}</div><button class="close-btn" id="closeModal">✕</button></div>
+        <label class="field-label">اسم الطالب</label>
+        <input class="field-input" id="f_name" placeholder="مثال: عمر أحمد" value="${escapeHtml(form.name)}">
+        <label class="field-label">رقم واتساب ولي الأمر</label>
+        <input class="field-input" id="f_parentPhone" placeholder="مثال: 201105153906+" value="${escapeHtml(form.parentPhone)}">
+        <label class="field-label">المادة الأساسية</label>
+        <input class="field-input" id="f_subject" placeholder="مثال: تحفيظ قرآن" value="${escapeHtml(form.subject)}">
+        <label class="field-label">مواعيد الحصص الأسبوعية</label>
+        <div id="scheduleRows"></div>
+        <button type="button" class="add-row-btn" id="addScheduleBtn">+ إضافة موعد تاني</button>
+
+        <details style="margin-top:6px;">
+          <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:var(--gold-dim,#8A7431);padding:10px 0;">⚙️ بيانات إضافية (اختياري) — دوس هنا لو محتاجها</summary>
+          <div style="padding-top:8px;">
+            <label class="field-label">تذكير قبل الحصة بكام دقيقة</label>
+            <select class="field-input" id="f_notify">
+              <option value="5" ${form.notifyBefore==='5'?'selected':''}>5 دقايق</option>
+              <option value="10" ${form.notifyBefore==='10'?'selected':''}>10 دقايق</option>
+              <option value="15" ${form.notifyBefore==='15'?'selected':''}>15 دقيقة</option>
+            </select>
+            <label class="field-label">اسم ولي الأمر</label>
+            <input class="field-input" id="f_parentName" value="${escapeHtml(form.parentName)}">
+            <label class="field-label">حالة الطالب</label>
+            <select class="field-input" id="f_status">
+              <option value="new" ${form.status==='new'?'selected':''}>جديد</option>
+              <option value="active" ${form.status==='active'?'selected':''}>نشط</option>
+              <option value="paused" ${form.status==='paused'?'selected':''}>متوقف</option>
+            </select>
+            <label class="field-label">ملاحظات دائمة</label>
+            <textarea class="field-input" id="f_permanentNotes" style="min-height:60px;">${escapeHtml(form.permanentNotes)}</textarea>
+            <label class="field-label">بنود إضافية</label>
+            <div id="customFieldRows"></div>
+            <button type="button" class="add-row-btn" id="addCustomFieldBtn">+ إضافة بند جديد</button>
+          </div>
+        </details>
+
+        <div style="font-size:11.5px;color:var(--muted);margin-top:10px;">💡 لإدارة باقات المواد والمعلمين والدفع والشهادات، افتح "ملف الطالب" من قائمة الطلاب بعد الحفظ.</div>
+        <button class="submit-btn" id="submitForm">${id?'حفظ التعديلات':'إضافة الطالب'}</button>
+      </div>
+    </div>`;
+  const scheduleContainer=document.getElementById('scheduleRows');
+  function addScheduleRow(slot){
+    const row=document.createElement('div'); row.className='schedule-row';
+    row.innerHTML=`<select class="sched-day">${DAY_KEYS.map((k,i)=>`<option value="${k}" ${k===slot.day?'selected':''}>${DAYS[i]}</option>`).join('')}</select><input type="time" class="sched-time" value="${slot.time||'16:00'}"><button type="button" class="row-remove">✕</button>`;
+    row.querySelector('.row-remove').addEventListener('click',()=>{ if(scheduleContainer.children.length>1) row.remove(); else toast('لازم موعد واحد على الأقل'); });
+    scheduleContainer.appendChild(row);
+  }
+  form.schedule.forEach(addScheduleRow);
+  document.getElementById('addScheduleBtn').addEventListener('click',()=>addScheduleRow({day:todayKey(),time:'16:00'}));
+  const customContainer=document.getElementById('customFieldRows');
+  function addCustomFieldRow(f){
+    const row=document.createElement('div'); row.className='custom-field-row';
+    row.innerHTML=`<input class="cf-label" placeholder="اسم البند" value="${escapeHtml(f.label||'')}"><input class="cf-value" placeholder="القيمة" value="${escapeHtml(f.value||'')}"><button type="button" class="row-remove">✕</button>`;
+    row.querySelector('.row-remove').addEventListener('click',()=>row.remove());
+    customContainer.appendChild(row);
+  }
+  form.customFields.forEach(addCustomFieldRow);
+  document.getElementById('addCustomFieldBtn').addEventListener('click',()=>addCustomFieldRow({label:'',value:''}));
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('submitForm').addEventListener('click',submitForm);
+}
+function closeForm(){ document.getElementById('modalRoot').innerHTML=''; editingId=null; }
+function submitForm(){
+  const name=document.getElementById('f_name').value.trim();
+  const subject=document.getElementById('f_subject').value.trim();
+  const notifyBefore=document.getElementById('f_notify').value;
+  const parentName=document.getElementById('f_parentName').value.trim();
+  const parentPhone=document.getElementById('f_parentPhone').value.trim();
+  const status=document.getElementById('f_status').value;
+  const permanentNotes=document.getElementById('f_permanentNotes').value.trim();
+  const schedule=[...document.querySelectorAll('#scheduleRows .schedule-row')].map(r=>({day:r.querySelector('.sched-day').value,time:r.querySelector('.sched-time').value})).filter(sl=>sl.time);
+  const customFields=[...document.querySelectorAll('#customFieldRows .custom-field-row')].map(r=>({label:r.querySelector('.cf-label').value.trim(),value:r.querySelector('.cf-value').value.trim()})).filter(f=>f.label||f.value);
+  if(!name||schedule.length===0) return;
+  const extra={name,subject,schedule,notifyBefore,parentName,parentPhone,status,permanentNotes,customFields};
+  if(editingId){ students=students.map(s=>s.id===editingId?{...s,...extra,updatedAt:new Date().toISOString()}:s); }
+  else{ students.push({id:uid(),...extra,packages:[],photo:'',createdAt:new Date().toISOString()}); }
+  saveStudents(); closeForm(); render(); toast('تم الحفظ بنجاح');
+}
+
+// ---------- STUDENT PROFILE (the hub) ----------
+function openProfile(id){ profileStudentId=id; currentView='profile'; render(); }
+
+function renderProfile(c){
+  const s=students.find(x=>x.id===profileStudentId);
+  if(!s){ currentView='tabs'; render(); return; }
+  const attendedTotal=(s.packages||[]).reduce((sum,p)=>sum+p.sessions.filter(ss=>ss.status==='attended').length,0);
+  const sessTotal=(s.packages||[]).reduce((sum,p)=>sum+p.sessions.length,0);
+  const attPct=sessTotal? Math.round(attendedTotal/sessTotal*100) : 0;
+
+  const header=document.createElement('div');
+  header.innerHTML=`
+    <div class="profile-header">
+      <button class="profile-back" id="backBtn">→ رجوع</button>
+      <div class="profile-top">
+        <div class="profile-photo" id="photoBox">${s.photo?`<img src="${s.photo}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`:'👤'}</div>
+        <div>
+          <div class="profile-name">${escapeHtml(s.name)}</div>
+          <div class="profile-meta">${escapeHtml(s.subject||'')} ${s.parentPhone?' · '+escapeHtml(s.parentPhone):''}</div>
+          <div class="profile-meta">نسبة الحضور: ${attPct}% (${attendedTotal}/${sessTotal} حصة)</div>
+        </div>
+      </div>
+      <div class="profile-actions">
+        <button class="profile-action-btn" id="editBasicBtn">✏️ تعديل البيانات</button>
+        <button class="profile-action-btn" id="waBtn">💬 واتساب</button>
+        <button class="profile-action-btn" id="printBtn">🖨️ طباعة الملف</button>
+      </div>
+    </div>
+  `;
+  c.appendChild(header);
+  header.querySelector('#backBtn').addEventListener('click',()=>{ currentView='tabs'; render(); });
+  header.querySelector('#editBasicBtn').addEventListener('click',()=>openForm(s.id));
+  header.querySelector('#waBtn').addEventListener('click',()=>{
+    if(!s.parentPhone){ toast('مفيش رقم واتساب مسجل'); return; }
+    window.open(`https://wa.me/${s.parentPhone.replace(/[^0-9]/g,'')}`,'_blank');
+  });
+  header.querySelector('#printBtn').addEventListener('click',()=>window.print());
+  header.querySelector('#photoBox').addEventListener('click',()=>{
+    const inp=document.getElementById('photoInput');
+    inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return; resizeImage(f,300,dataUrl=>{ s.photo=dataUrl; saveStudents(); render(); }); };
+    inp.click();
+  });
+
+  // ---- visual attendance calendar (last 30 days) ----
+  const attByDate={};
+  (s.packages||[]).forEach(p=>p.sessions.forEach(ss=>{ if(ss.date) attByDate[ss.date]=ss.status; }));
+  const calDays=[];
+  for(let i=29;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const key=d.toISOString().slice(0,10);
+    calDays.push({key, status: attByDate[key]||null, label:d.getDate()});
+  }
+  const calWrap=document.createElement('div');
+  calWrap.innerHTML=`
+    <div class="section-title" style="border-top:none;">سجل الحضور (آخر 30 يوم)</div>
+    <div class="cal-grid">${calDays.map(d=>`<div class="cal-day ${d.status==='attended'?'attended':d.status==='absent'?'absent':''}" title="${d.key}">${d.label}</div>`).join('')}</div>
+    <div class="cal-legend">
+      <span><span class="cal-dot" style="background:#3FA66A;"></span> حضر</span>
+      <span><span class="cal-dot" style="background:#C24A3A;"></span> غاب</span>
+      <span><span class="cal-dot" style="background:var(--paper2);"></span> بدون حصة</span>
+    </div>
+  `;
+  c.appendChild(calWrap);
+
+  const pkgWrap=document.createElement('div');
+  pkgWrap.innerHTML=`<div class="section-title" style="border-top:none;">باقات المواد</div>`;
+  c.appendChild(pkgWrap);
+
+  (s.packages||[]).forEach(p=>{
+    const teacher=teachers.find(t=>t.id===p.teacherId);
+    const doneCount=p.sessions.filter(ss=>ss.status==='attended').length;
+    const pct=p.sessions.length?Math.round(doneCount/p.sessions.length*100):0;
+    const complete=p.sessions.length>0 && p.sessions.every(ss=>ss.status && ss.status!=='pending');
+    const card=document.createElement('div');
+    card.className='package-card';
+    card.innerHTML=`
+      <div class="package-head">
+        <div>
+          <div class="package-title">${escapeHtml(p.subject)} ${p.active?'':'<span style="font-size:11px;color:var(--muted);">(منتهية)</span>'}</div>
+          <div class="package-sub">${teacher?'👨‍🏫 '+escapeHtml(teacher.name):'بدون معلم'} ${p.whatsappGroup?' · <a href="'+escapeHtml(p.whatsappGroup)+'" target="_blank">جروب الواتساب</a>':''}</div>
+        </div>
+        <span class="pay-badge ${p.paid?'pay-paid':'pay-unpaid'}">${p.paid?'✓ مدفوع':'غير مدفوع'}</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;"></div></div>
+      <div class="package-sub">${doneCount}/${p.sessions.length} حصة · ${escapeHtml(p.amount||'')} ${escapeHtml(p.currency||'')} ${p.amountEGP?' ('+escapeHtml(p.amountEGP)+' ج.م)':''}</div>
+      <div class="session-list">
+        ${p.sessions.map((ss,i)=>`<div class="session-chip ${ss.status==='attended'?'attended':ss.status==='absent'?'absent':''}" data-pkg="${p.id}" data-sess="${i}" title="${ss.date}">${i+1}</div>`).join('')}
+      </div>
+      ${p.receipt?`<img class="receipt-thumb" src="${p.receipt}" data-view-receipt="${p.id}">`:''}
+      ${(p.active && !complete && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)<=2 && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)>0)?`<div class="renew-warning">⏰ باقي ${p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length} حصة بس على انتهاء الباقة</div>`:''}
+      <div class="package-footer">
+        <button class="mini-btn ${p.paid?'':'filled'}" data-toggle-paid="${p.id}">${p.paid?'إلغاء الدفع':'تسجيل كمدفوع'}</button>
+        <button class="mini-btn" data-upload-receipt="${p.id}">📎 إيصال</button>
+        <button class="mini-btn" data-remind="${p.id}">📲 تذكير تجديد</button>
+        <button class="mini-btn" data-makeup="${p.id}">➕ حصة تعويضية</button>
+        ${complete?`<button class="mini-btn filled" data-cert="${p.id}">🎓 شهادة تقدير</button><button class="mini-btn" data-renew="${p.id}">🔁 باقة جديدة</button>`:''}
+        <button class="mini-btn" data-del-pkg="${p.id}" style="color:#B8391A;border-color:#E7C9C9;">حذف</button>
+      </div>
+    `;
+    c.appendChild(card);
+  });
+
+  const addPkgBtn=document.createElement('button');
+  addPkgBtn.className='add-row-btn'; addPkgBtn.textContent='+ إضافة باقة مادة جديدة';
+  addPkgBtn.addEventListener('click',()=>openPackageForm(s.id,null));
+  c.appendChild(addPkgBtn);
+
+  // event wiring
+  c.querySelectorAll('[data-pkg]').forEach(chip=>chip.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===chip.dataset.pkg);
+    const sess=pkg.sessions[Number(chip.dataset.sess)];
+    sess.status = sess.status==='attended'?'absent': sess.status==='absent'?'pending':'attended';
+    sess.date = sess.status==='pending' ? '' : dateStr();
+    saveStudents(); render();
+  }));
+  c.querySelectorAll('[data-remind]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.remind);
+    const remaining=pkg.sessions.length - pkg.sessions.filter(ss=>ss.status==='attended'||ss.status==='absent').length;
+    const msg=`السلام عليكم، تذكير بسيط من أكاديمية أمجاد 🌙\nباقة "${pkg.subject}" لـ${s.name} باقي عليها ${remaining} حصة بس.\nحابين نجدد الباقة الجاية؟ 📚`;
+    const phone=(s.parentPhone||'').replace(/[^0-9]/g,'');
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`,'_blank');
+  }));
+  c.querySelectorAll('[data-makeup]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.makeup);
+    pkg.sessions.push({date:'',status:'pending',makeup:true});
+    pkg.totalSessions=pkg.sessions.length;
+    saveStudents(); render(); toast('اتضافت حصة تعويضية للباقة');
+  }));
+  c.querySelectorAll('[data-toggle-paid]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.togglePaid);
+    pkg.paid=!pkg.paid;
+    if(pkg.paid && pkg.amountEGP){
+      const invoiceNumber=nextInvoiceNumber();
+      pkg.invoiceNumber=invoiceNumber;
+      transactions.push({id:uid(),type:'income',category:'اشتراك: '+s.name+' - '+pkg.subject,amount:Number(pkg.amountEGP),currency:'EGP',date:dateStr(),note:'فاتورة رقم '+invoiceNumber,invoiceNumber,createdAt:new Date().toISOString()});
+      saveTransactions();
+      generateInvoice(s,pkg,invoiceNumber);
+    }
+    saveStudents(); render(); toast(pkg.paid?'تم تسجيل الدفع وإصدار الفاتورة':'تم إلغاء الدفع');
+  }));
+  c.querySelectorAll('[data-upload-receipt]').forEach(b=>b.addEventListener('click',()=>{
+    const inp=document.getElementById('photoInput');
+    inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return; resizeImage(f,500,dataUrl=>{
+      const pkg=s.packages.find(p=>p.id===b.dataset.uploadReceipt);
+      pkg.receipt=dataUrl; saveStudents(); render(); toast('تم رفع الإيصال');
+    }); };
+    inp.click();
+  }));
+  c.querySelectorAll('[data-view-receipt]').forEach(img=>img.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===img.dataset.viewReceipt);
+    window.open(pkg.receipt,'_blank');
+  }));
+  c.querySelectorAll('[data-cert]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.cert);
+    generateCertificate(s,pkg);
+  }));
+  c.querySelectorAll('[data-renew]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.renew);
+    pkg.active=false;
+    openPackageForm(s.id,null,{subject:pkg.subject,teacherId:pkg.teacherId,whatsappGroup:pkg.whatsappGroup});
+  }));
+  c.querySelectorAll('[data-del-pkg]').forEach(b=>b.addEventListener('click',()=>{
+    if(confirm('حذف الباقة دي نهائيًا؟')){ s.packages=s.packages.filter(p=>p.id!==b.dataset.delPkg); saveStudents(); render(); }
+  }));
+}
+
+function openPackageForm(studentId, pkgId, prefill){
+  const s=students.find(x=>x.id===studentId);
+  const existing=pkgId?s.packages.find(p=>p.id===pkgId):null;
+  const form=existing||prefill||{subject:s.subject||'',teacherId:'',whatsappGroup:'',totalSessions:8,amount:'',currency:'EGP',amountEGP:'',paid:false};
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">إضافة باقة مادة جديدة</div><button class="close-btn" id="closeModal">✕</button></div>
+        <label class="field-label">المادة</label>
+        <input class="field-input" id="pf_subject" value="${escapeHtml(form.subject||'')}">
+        <label class="field-label">المعلم</label>
+        <select class="field-input" id="pf_teacher">
+          <option value="">بدون معلم — اكتب اسم جديد تحت</option>
+          ${teachers.map(t=>`<option value="${t.id}" ${form.teacherId===t.id?'selected':''}>${escapeHtml(t.name)}</option>`).join('')}
+        </select>
+        <label class="field-label">أو اسم معلم جديد (هيتضاف تلقائيًا لفهرس المعلمين)</label>
+        <input class="field-input" id="pf_newTeacher" placeholder="اكتب هنا لو المعلم لسه مش مسجل">
+        <label class="field-label">رابط جروب الواتساب (اختياري)</label>
+        <input class="field-input" id="pf_waGroup" value="${escapeHtml(form.whatsappGroup||'')}">
+        <label class="field-label">عدد حصص الباقة</label>
+        <input type="number" class="field-input" id="pf_total" value="${form.totalSessions||8}">
+        <div class="field-row">
+          <div><label class="field-label">المبلغ</label><input type="number" class="field-input" id="pf_amount" value="${escapeHtml(form.amount||'')}"></div>
+          <div><label class="field-label">العملة</label><select class="field-input" id="pf_currency">${CURRENCIES.map(c=>`<option value="${c}" ${c===form.currency?'selected':''}>${c}</option>`).join('')}</select></div>
+        </div>
+        <label class="field-label">المبلغ بالجنيه المصري (يدوي)</label>
+        <input type="number" class="field-input" id="pf_egp" value="${escapeHtml(form.amountEGP||'')}">
+        <button class="submit-btn" id="submitPkg">حفظ الباقة</button>
+      </div>
+    </div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('submitPkg').addEventListener('click',()=>{
+    const subject=document.getElementById('pf_subject').value.trim();
+    let teacherId=document.getElementById('pf_teacher').value;
+    const newTeacherName=document.getElementById('pf_newTeacher').value.trim();
+    const whatsappGroup=document.getElementById('pf_waGroup').value.trim();
+    const totalSessions=Number(document.getElementById('pf_total').value)||1;
+    const amount=document.getElementById('pf_amount').value.trim();
+    const currency=document.getElementById('pf_currency').value;
+    const amountEGP=document.getElementById('pf_egp').value.trim();
+    if(!subject) return;
+    if(newTeacherName){
+      const nt={id:uid(),name:newTeacherName,phone:'',subjects:subject,salary:'',salaryCurrency:'EGP',notes:''};
+      teachers.push(nt); saveTeachers(); teacherId=nt.id;
+    }
+    const sessions=Array.from({length:totalSessions},(_,i)=>({date:'',status:'pending'}));
+    const pkg={id:uid(),subject,teacherId,whatsappGroup,totalSessions,sessions,amount,currency,amountEGP,paid:false,receipt:'',active:true,createdAt:dateStr()};
+    s.packages.push(pkg);
+    saveStudents(); closeForm(); render(); toast('تم إضافة الباقة');
+  });
+}
+
+function generateCertificate(student, pkg){
+  const canvas=document.createElement('canvas');
+  canvas.width=1000; canvas.height=700;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#0B1B33'; ctx.fillRect(0,0,1000,700);
+  ctx.strokeStyle='#C9A227'; ctx.lineWidth=8; ctx.strokeRect(30,30,940,640);
+  ctx.strokeStyle='#E9CE86'; ctx.lineWidth=2; ctx.strokeRect(50,50,900,600);
+  ctx.fillStyle='#E9CE86'; ctx.font='bold 26px Tahoma'; ctx.textAlign='center';
+  ctx.fillText('أكاديمية أمجاد', 500, 130);
+  ctx.fillStyle='#C9A227'; ctx.font='bold 44px Tahoma';
+  ctx.fillText('شهادة تقدير', 500, 220);
+  ctx.fillStyle='#fff'; ctx.font='20px Tahoma';
+  ctx.fillText('تُمنح هذه الشهادة إلى', 500, 300);
+  ctx.font='bold 38px Tahoma'; ctx.fillStyle='#E9CE86';
+  ctx.fillText(student.name, 500, 360);
+  ctx.fillStyle='#C9D0DE'; ctx.font='19px Tahoma';
+  ctx.fillText('لإتمامه باقة "'+pkg.subject+'" بنجاح ('+pkg.sessions.length+' حصة)', 500, 420);
+  ctx.font='15px Tahoma'; ctx.fillStyle='#8E97A8';
+  ctx.fillText('بتاريخ: '+dateStr(), 500, 470);
+  ctx.font='16px Tahoma'; ctx.fillStyle='#E9CE86';
+  ctx.fillText('🌙', 500, 550);
+  const link=document.createElement('a');
+  link.download='شهادة_'+student.name+'.png';
+  link.href=canvas.toDataURL('image/png');
+  link.click();
+  toast('تم تحميل الشهادة');
+}
+
+// ---------- INVOICES (professional numbered invoicing) ----------
+function nextInvoiceNumber(){
+  let seq=parseInt(localStorage.getItem('amjad_invoice_seq')||'1000',10);
+  seq+=1;
+  localStorage.setItem('amjad_invoice_seq',String(seq));
+  return 'AMJ-'+seq;
+}
+function generateInvoice(student,pkg,invoiceNumber){
+  const canvas=document.createElement('canvas');
+  canvas.width=1000; canvas.height=760;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#F8F4E9'; ctx.fillRect(0,0,1000,760);
+  ctx.fillStyle='#0B1B33'; ctx.fillRect(0,0,1000,140);
+  ctx.fillStyle='#E9CE86'; ctx.font='bold 30px Tahoma'; ctx.textAlign='right';
+  ctx.fillText('أكاديمية أمجاد', 940, 65);
+  ctx.fillStyle='#C9D0DE'; ctx.font='16px Tahoma';
+  ctx.fillText('فاتورة رسمية بالدفع', 940, 100);
+  ctx.textAlign='left'; ctx.fillStyle='#C9A227'; ctx.font='bold 22px Tahoma';
+  ctx.fillText(invoiceNumber, 60, 65);
+  ctx.fillStyle='#C9D0DE'; ctx.font='14px Tahoma';
+  ctx.fillText(new Date().toLocaleDateString('ar-EG'), 60, 95);
+
+  ctx.textAlign='right'; ctx.fillStyle='#0B1B33';
+  ctx.font='bold 20px Tahoma'; ctx.fillText('بيانات الطالب', 940, 200);
+  ctx.font='17px Tahoma'; ctx.fillStyle='#333';
+  ctx.fillText('الاسم: '+student.name, 940, 235);
+  if(student.parentName) ctx.fillText('ولي الأمر: '+student.parentName, 940, 265);
+  if(student.parentPhone) ctx.fillText('التواصل: '+student.parentPhone, 940, 295);
+
+  ctx.strokeStyle='#C9A227'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(60,330); ctx.lineTo(940,330); ctx.stroke();
+
+  ctx.font='bold 20px Tahoma'; ctx.fillStyle='#0B1B33';
+  ctx.fillText('تفاصيل الاشتراك', 940, 370);
+  ctx.font='17px Tahoma'; ctx.fillStyle='#333';
+  ctx.fillText('الباقة / المادة: '+pkg.subject, 940, 405);
+  ctx.fillText('عدد الحصص: '+pkg.sessions.length, 940, 435);
+  if(pkg.amount) ctx.fillText('المبلغ الأصلي: '+pkg.amount+' '+(pkg.currency||''), 940, 465);
+
+  ctx.strokeStyle='#C9A227'; ctx.beginPath(); ctx.moveTo(60,500); ctx.lineTo(940,500); ctx.stroke();
+
+  ctx.font='bold 26px Tahoma'; ctx.fillStyle='#1F7A4D';
+  ctx.fillText('المبلغ المدفوع: '+Number(pkg.amountEGP||0).toLocaleString('ar')+' جنيه مصري', 940, 550);
+  ctx.font='bold 18px Tahoma'; ctx.fillStyle='#1F7A4D';
+  ctx.fillText('✓ تم السداد بالكامل', 940, 590);
+
+  ctx.textAlign='center'; ctx.fillStyle='#8E97A8'; ctx.font='14px Tahoma';
+  ctx.fillText('أكاديمية أمجاد — هذه الفاتورة صادرة إلكترونيًا وتُعتمد كإيصال استلام رسمي', 500, 700);
+  ctx.fillText('رقم الفاتورة: '+invoiceNumber, 500, 725);
+
+  const link=document.createElement('a');
+  link.download='فاتورة_'+invoiceNumber+'_'+student.name+'.png';
+  link.href=canvas.toDataURL('image/png');
+  link.click();
+}
+
+// ---------- TEACHERS ----------
+function renderTeachers(c){
+  if(teachers.length===0){ c.innerHTML='<div class="empty">👨‍🏫<br><br>لسه معملتش أي معلم.. دوس + لإضافة أول معلم</div>'; return; }
+  teachers.forEach(t=>{
+    const cnt=students.filter(s=>(s.packages||[]).some(p=>p.teacherId===t.id)).length;
+    const wa=t.phone?`https://wa.me/${t.phone.replace(/[^0-9]/g,'')}`:null;
+    const row=document.createElement('div'); row.className='student-row';
+    row.innerHTML=`
+      <div class="info">
+        <div class="name">${escapeHtml(t.name)}</div>
+        ${t.subjects?`<div class="meta">📚 ${escapeHtml(t.subjects)}</div>`:''}
+        <div class="meta">👥 ${cnt} طالب</div>
+        ${t.phone?`<div class="meta">📱 ${escapeHtml(t.phone)} ${wa?`· <a href="${wa}" target="_blank">واتساب</a>`:''}</div>`:''}
+        ${t.salary?`<div class="meta">💰 ${escapeHtml(t.salary)} ${escapeHtml(t.salaryCurrency||'')}</div>`:''}
+      </div>
+      <button class="btn-outline" data-pay-salary="${t.id}">تسجيل راتب</button>
+      <button class="btn-outline" data-edit-teacher="${t.id}">تعديل</button>
+      <button class="icon-btn" data-del-teacher="${t.id}">🗑</button>
+    `;
+    c.appendChild(row);
+  });
+  c.querySelectorAll('[data-edit-teacher]').forEach(b=>b.addEventListener('click',()=>openTeacherForm(b.dataset.editTeacher)));
+  c.querySelectorAll('[data-del-teacher]').forEach(b=>b.addEventListener('click',()=>{
+    const id=b.dataset.delTeacher;
+    if(confirm('متأكد من حذف المعلم؟')){ teachers=teachers.filter(t=>t.id!==id); saveTeachers(); render(); }
+  }));
+  c.querySelectorAll('[data-pay-salary]').forEach(b=>b.addEventListener('click',()=>{
+    const t=teachers.find(x=>x.id===b.dataset.paySalary);
+    if(!t.salary){ toast('محتاج تسجل قيمة الراتب الأول من تعديل المعلم'); return; }
+    transactions.push({id:uid(),type:'expense',category:'راتب معلم: '+t.name,amount:Number(t.salary)||0,currency:t.salaryCurrency||'EGP',date:dateStr(),note:''});
+    saveTransactions(); toast('تم تسجيل الراتب كمصروف');
+  }));
+}
+function openTeacherForm(id){
+  editingId=id;
+  const existing=id?teachers.find(t=>t.id===id):null;
+  const form=existing||{name:'',phone:'',subjects:'',salary:'',salaryCurrency:'EGP',notes:''};
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">${id?'تعديل المعلم':'إضافة معلم'}</div><button class="close-btn" id="closeModal">✕</button></div>
+        <label class="field-label">الاسم</label><input class="field-input" id="tf_name" value="${escapeHtml(form.name)}">
+        <label class="field-label">التخصص</label><input class="field-input" id="tf_subjects" value="${escapeHtml(form.subjects)}">
+        <label class="field-label">واتساب</label><input class="field-input" id="tf_phone" value="${escapeHtml(form.phone)}">
+        <div class="field-row">
+          <div><label class="field-label">الراتب</label><input class="field-input" id="tf_salary" value="${escapeHtml(form.salary)}"></div>
+          <div><label class="field-label">العملة</label><select class="field-input" id="tf_currency">${CURRENCIES.map(c=>`<option value="${c}" ${c===form.salaryCurrency?'selected':''}>${c}</option>`).join('')}</select></div>
+        </div>
+        <label class="field-label">ملاحظات</label><textarea class="field-input" id="tf_notes">${escapeHtml(form.notes)}</textarea>
+        <button class="submit-btn" id="submitTeacher">حفظ</button>
+      </div>
+    </div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('submitTeacher').addEventListener('click',()=>{
+    const name=document.getElementById('tf_name').value.trim(); if(!name)return;
+    const extra={name,subjects:document.getElementById('tf_subjects').value.trim(),phone:document.getElementById('tf_phone').value.trim(),salary:document.getElementById('tf_salary').value.trim(),salaryCurrency:document.getElementById('tf_currency').value,notes:document.getElementById('tf_notes').value.trim()};
+    if(editingId){ teachers=teachers.map(t=>t.id===editingId?{...t,...extra}:t); } else { teachers.push({id:uid(),...extra}); }
+    saveTeachers(); closeForm(); render(); toast('تم الحفظ');
+  });
+}
+
+// ---------- FINANCE ----------
+const ICONS=['💵','🧾','📢','🏠','💡','🧑‍🏫','📦','🛠️','🎁','📱'];
+function renderFinance(c){
+  const filtered=finTypeFilter==='all'?transactions:transactions.filter(t=>t.type===finTypeFilter);
+  const sorted=[...filtered].sort((a,b)=>b.date.localeCompare(a.date));
+  // الرصيد الجاري: نحسبه بالترتيب الزمني الصحيح (من الأقدم للأحدث) لكل عملة على حدة
+  const chronological=[...transactions].sort((a,b)=>a.date.localeCompare(b.date)||(a.createdAt||'').localeCompare(b.createdAt||''));
+  const balances={}; const runningMap={};
+  chronological.forEach(t=>{
+    const cur=t.currency||'EGP';
+    balances[cur]=(balances[cur]||0)+(t.type==='income'?Number(t.amount||0):-Number(t.amount||0));
+    runningMap[t.id]=balances[cur];
+  });
+  const byCur={};
+  transactions.forEach(t=>{ const cur=t.currency||'EGP'; if(!byCur[cur])byCur[cur]={income:0,expense:0,ad:0}; byCur[cur][t.type]+=Number(t.amount||0); });
+  let summary=Object.keys(byCur).map(cur=>{
+    const d=byCur[cur]; const net=d.income-d.expense-d.ad;
+    return `<div class="stats-section" style="margin-bottom:10px;background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:14px;">
+      <div style="font-weight:800;font-size:13px;margin-bottom:8px;">${cur} — ${CURRENCY_LABELS[cur]||''}</div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;text-align:center;"><div style="color:#1F7A4D;font-weight:800;">${d.income.toLocaleString('ar')}</div><div style="font-size:10px;color:var(--muted);">إيرادات</div></div>
+        <div style="flex:1;text-align:center;"><div style="color:#B8391A;font-weight:800;">${(d.expense+d.ad).toLocaleString('ar')}</div><div style="font-size:10px;color:var(--muted);">مصروفات</div></div>
+        <div style="flex:1;text-align:center;"><div style="color:${net>=0?'#1F7A4D':'#B8391A'};font-weight:800;">${net.toLocaleString('ar')}</div><div style="font-size:10px;color:var(--muted);">صافي</div></div>
+      </div>
+    </div>`;
+  }).join('') || '<div class="empty" style="padding:20px;">مفيش معاملات لسه</div>';
+
+  c.innerHTML=summary+`
+    <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">
+      <button class="btn-outline" data-fin="all">الكل</button>
+      <button class="btn-outline" data-fin="income">إيرادات</button>
+      <button class="btn-outline" data-fin="expense">مصروفات</button>
+      <button class="btn-outline" data-fin="ad">إعلانات</button>
+    </div>
+    <div id="txList"></div>`;
+  c.querySelectorAll('[data-fin]').forEach(b=>b.addEventListener('click',()=>{finTypeFilter=b.dataset.fin;render();}));
+  const txList=document.getElementById('txList');
+  if(sorted.length===0){ txList.innerHTML='<div class="empty">💰<br><br>مفيش معاملات</div>'; }
+  else{
+    sorted.forEach(t=>{
+      const row=document.createElement('div'); row.className='student-row';
+      row.innerHTML=`
+        <div style="width:36px;height:36px;border-radius:9px;background:var(--paper2);display:flex;align-items:center;justify-content:center;font-size:16px;">${t.icon||(t.type==='income'?'💵':t.type==='expense'?'🧾':'📢')}</div>
+        <div class="info"><div class="name">${escapeHtml(t.category)}</div><div class="meta">${t.date} ${t.note?'· '+escapeHtml(t.note):''}</div></div>
+        <div style="text-align:left;">
+          <div style="font-weight:800;color:${t.type==='income'?'#1F7A4D':'#B8391A'};">${t.type==='income'?'+':'-'}${Number(t.amount).toLocaleString('ar')} ${t.currency||''}</div>
+          <div style="font-size:10px;color:var(--muted);">الرصيد: ${(runningMap[t.id]||0).toLocaleString('ar')}</div>
+        </div>
+        <button class="icon-btn" data-deltx="${t.id}">🗑</button>
+      `;
+      txList.appendChild(row);
+    });
+    txList.querySelectorAll('[data-deltx]').forEach(b=>b.addEventListener('click',()=>{ transactions=transactions.filter(t=>t.id!==b.dataset.deltx); saveTransactions(); render(); }));
+  }
+}
+function openTxForm(){
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`
+    <div class="modal-overlay" id="overlay">
+      <div class="modal">
+        <div class="modal-head"><div class="modal-title">إضافة معاملة مالية</div><button class="close-btn" id="closeModal">✕</button></div>
+        <label class="field-label">النوع</label>
+        <select class="field-input" id="t_type"><option value="income">إيراد</option><option value="expense">مصروف</option><option value="ad">إعلان</option></select>
+        <label class="field-label">الأيقونة</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">${ICONS.map(i=>`<button type="button" class="icon-pick" data-icon="${i}" style="font-size:18px;padding:6px 10px;border-radius:8px;border:1px solid #E0DAC8;background:#fff;">${i}</button>`).join('')}</div>
+        <label class="field-label">البند</label><input class="field-input" id="t_category" placeholder="مثال: راتب معلم">
+        <div class="field-row">
+          <div><label class="field-label">المبلغ</label><input type="number" class="field-input" id="t_amount"></div>
+          <div><label class="field-label">العملة</label><select class="field-input" id="t_currency">${CURRENCIES.map(c=>`<option value="${c}" ${c===lastCurrency?'selected':''}>${c}</option>`).join('')}</select></div>
+        </div>
+        <label class="field-label">التاريخ</label><input type="date" class="field-input" id="t_date" value="${dateStr()}">
+        <label class="field-label">ملاحظة</label><input class="field-input" id="t_note">
+        <button class="submit-btn" id="submitTx">إضافة</button>
+      </div>
+    </div>`;
+  let pickedIcon='';
+  const KEYWORD_ICONS=[[/راتب|مرتب|معلم/,'🧑‍🏫'],[/كهرب|مياه|إيجار|صيانة/,'🏠'],[/نور|كهرب/,'💡'],[/إعلان|تسويق/,'📢'],[/أدوات|قرطاسية/,'📦'],[/هدي|جائزة/,'🎁']];
+  document.getElementById('t_category').addEventListener('input',e=>{
+    if(pickedIcon) return;
+    const match=KEYWORD_ICONS.find(([re])=>re.test(e.target.value));
+    if(match){
+      const btn=document.querySelector(`.icon-pick[data-icon="${match[1]}"]`);
+      if(btn){ document.querySelectorAll('.icon-pick').forEach(x=>x.style.borderColor='#E0DAC8'); btn.style.borderColor='var(--gold)'; btn.dataset.auto='1'; }
+    }
+  });
+  document.querySelectorAll('.icon-pick').forEach(b=>b.addEventListener('click',()=>{
+    pickedIcon=b.dataset.icon;
+    document.querySelectorAll('.icon-pick').forEach(x=>x.style.borderColor='#E0DAC8');
+    b.style.borderColor='var(--gold)';
+  }));
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('submitTx').addEventListener('click',()=>{
+    const type=document.getElementById('t_type').value;
+    const category=document.getElementById('t_category').value.trim();
+    const amount=Number(document.getElementById('t_amount').value);
+    const currency=document.getElementById('t_currency').value;
+    const date=document.getElementById('t_date').value;
+    const note=document.getElementById('t_note').value.trim();
+    if(!category||!amount||!date) return;
+    lastCurrency=currency; localStorage.setItem('amjad_last_currency',currency);
+    transactions.push({id:uid(),type,category,amount,currency,date,note,icon:pickedIcon});
+    saveTransactions(); closeForm(); render(); toast('تم تسجيل المعاملة');
+  });
+}
+
+// ---------- STATS ----------
+function renderBookings(c){
+  const pending = bookings.filter(b=>b.status==='pending').sort((a,b)=>(b.created_at||'').localeCompare(a.created_at||''));
+  const done = bookings.filter(b=>b.status!=='pending');
+  if(bookings.length===0){
+    c.innerHTML='<div class="empty">📅<br><br>مفيش حجوزات جديدة لسه<br><span style="font-size:11.5px;">شارك رابط صفحة الحجز مع العملاء المهتمين</span></div>';
+    return;
+  }
+  let html = pending.length ? `<div class="section-title" style="border-top:none;margin-top:0;">🆕 حجوزات جديدة (${pending.length})</div>` : '<div class="empty">مفيش حجوزات جديدة دلوقتي</div>';
+  pending.forEach(b=>{
+    const waLink = b.phone ? `https://wa.me/${b.phone.replace(/[^0-9]/g,'')}` : null;
+    html += `
+      <div class="student-row" style="flex-wrap:wrap;">
+        <div class="info">
+          <div class="name">${escapeHtml(b.name)}</div>
+          <div class="meta">📚 ${escapeHtml(b.subject||'')}</div>
+          <div class="meta">📅 ${escapeHtml(b.preferred_day||'')} — ${escapeHtml(b.preferred_time||'')}</div>
+          ${b.phone?`<div class="meta">📱 ${escapeHtml(b.phone)} ${waLink?`· <a class="contact-link" href="${waLink}" target="_blank">واتساب</a>`:''}</div>`:''}
+          ${b.notes?`<div class="meta">📝 ${escapeHtml(b.notes)}</div>`:''}
+        </div>
+        <button class="btn-outline" data-convert="${b.id}" style="border-color:#1F7A4D;color:#1F7A4D;">✓ تحويل لطالب</button>
+        <button class="icon-btn" data-dismiss="${b.id}">🗑</button>
+      </div>`;
+  });
+  if(done.length){
+    html += `<div class="section-title">✅ حجوزات تم التعامل معاها (${done.length})</div>`;
+    done.forEach(b=>{
+      html += `<div class="student-row" style="opacity:0.55;">
+        <div class="info"><div class="name">${escapeHtml(b.name)}</div><div class="meta">${escapeHtml(b.subject||'')}</div></div>
+        <button class="icon-btn" data-dismiss="${b.id}">🗑</button>
+      </div>`;
+    });
+  }
+  c.innerHTML = html;
+  c.querySelectorAll('[data-convert]').forEach(btn=>btn.addEventListener('click',()=>{
+    const b = bookings.find(x=>x.id===btn.dataset.convert);
+    const dayIdx = DAYS.indexOf(b.preferred_day);
+    const dayKey = dayIdx>=0 ? DAY_KEYS[dayIdx] : todayKey();
+    b.status='converted'; saveBookings();
+    openForm(null, { name:b.name, phone:b.phone, subject:b.subject, day:dayKey, time:b.preferred_time, notes:b.notes });
+  }));
+  c.querySelectorAll('[data-dismiss]').forEach(btn=>btn.addEventListener('click',()=>{
+    if(confirm('حذف الحجز ده؟')){
+      bookings = bookings.filter(b=>b.id!==btn.dataset.dismiss);
+      saveBookings(); render();
+    }
+  }));
+}
+
+function renderStats(c){
+  const total=students.length, active=students.filter(s=>s.status==='active').length, nw=students.filter(s=>s.status==='new').length, paused=students.filter(s=>s.status==='paused').length;
+  const byCur={};
+  transactions.forEach(t=>{ const cur=t.currency||'EGP'; if(!byCur[cur])byCur[cur]={income:0,expense:0,ad:0}; byCur[cur][t.type]+=Number(t.amount||0); });
+  const finRows=Object.keys(byCur).map(cur=>{ const d=byCur[cur]; const net=d.income-d.expense-d.ad;
+    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F0EAD6;font-size:13px;"><span>${cur}</span><span style="color:${net>=0?'#1F7A4D':'#B8391A'};font-weight:700;">صافي: ${net.toLocaleString('ar')}</span></div>`;
+  }).join('') || '<div style="font-size:12px;color:var(--muted);">لا يوجد بيانات</div>';
+
+  // month-over-month comparison (EGP only, most common)
+  const now=new Date(); const thisMonth=now.toISOString().slice(0,7);
+  const lastMonthDate=new Date(now.getFullYear(),now.getMonth()-1,1); const lastMonth=lastMonthDate.toISOString().slice(0,7);
+  const sumMonth=(m,type)=>transactions.filter(t=>t.date&&t.date.startsWith(m)&&t.type===type&&(t.currency||'EGP')==='EGP').reduce((s,t)=>s+Number(t.amount||0),0);
+  const thisIncome=sumMonth(thisMonth,'income'), lastIncome=sumMonth(lastMonth,'income');
+  const diff=thisIncome-lastIncome;
+  const diffPct=lastIncome? Math.round(diff/lastIncome*100) : (thisIncome>0?100:0);
+
+  // salary reminder: teachers with no salary-expense logged this month
+  const dayOfMonth=now.getDate();
+  const teachersUnpaidThisMonth=teachers.filter(t=>!transactions.some(tx=>tx.type==='expense'&&tx.date&&tx.date.startsWith(thisMonth)&&tx.category&&tx.category.includes(t.name)));
+  const showSalaryBanner = dayOfMonth>=25 && teachersUnpaidThisMonth.length>0;
+
+  c.innerHTML=`
+    ${showSalaryBanner?`<div class="salary-banner">💰 قرب معاد رواتب الشهر — لسه محدّش سجل مرتب: ${teachersUnpaidThisMonth.map(t=>escapeHtml(t.name)).join('، ')}</div>`:''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
+      <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;">${total}</div><div style="font-size:11px;color:var(--muted);">إجمالي الطلاب</div></div>
+      <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;color:var(--gold);">${active}</div><div style="font-size:11px;color:var(--muted);">نشط</div></div>
+      <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;">${nw}</div><div style="font-size:11px;color:var(--muted);">جديد</div></div>
+      <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;">${paused}</div><div style="font-size:11px;color:var(--muted);">متوقف</div></div>
+    </div>
+    <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:16px;margin-bottom:14px;">
+      <div style="font-weight:800;font-size:14px;margin-bottom:8px;">📊 الملخص المالي</div>
+      ${finRows}
+    </div>
+    <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:16px;margin-bottom:14px;">
+      <div style="font-weight:800;font-size:14px;margin-bottom:8px;">📈 مقارنة الإيرادات (جنيه مصري)</div>
+      <div class="compare-row"><span>الشهر ده</span><span style="font-weight:800;">${thisIncome.toLocaleString('ar')}</span></div>
+      <div class="compare-row"><span>الشهر اللي فات</span><span style="font-weight:800;">${lastIncome.toLocaleString('ar')}</span></div>
+      <div class="compare-row" style="border-bottom:none;"><span>الفرق</span><span class="${diff>=0?'compare-up':'compare-down'}">${diff>=0?'▲':'▼'} ${Math.abs(diffPct)}%</span></div>
+    </div>
+    <button class="add-row-btn" id="monthlyReportBtn">⬇️ تحميل تقرير الشهر (صورة)</button>
+  `;
+  document.getElementById('monthlyReportBtn').addEventListener('click',()=>generateMonthlyReport(thisMonth,thisIncome,lastIncome,byCur));
+}
+
+function generateMonthlyReport(month,thisIncome,lastIncome,byCur){
+  const canvas=document.createElement('canvas'); canvas.width=1000; canvas.height=800;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#0B1B33'; ctx.fillRect(0,0,1000,800);
+  ctx.strokeStyle='#C9A227'; ctx.lineWidth=6; ctx.strokeRect(20,20,960,760);
+  ctx.textAlign='center';
+  ctx.fillStyle='#E9CE86'; ctx.font='bold 34px Tahoma'; ctx.fillText('تقرير أكاديمية أمجاد الشهري', 500, 100);
+  ctx.fillStyle='#fff'; ctx.font='22px Tahoma'; ctx.fillText(month, 500, 145);
+  let y=220;
+  ctx.textAlign='right'; ctx.font='bold 24px Tahoma'; ctx.fillStyle='#E9CE86';
+  ctx.fillText('الإيرادات (جنيه مصري):', 850, y); y+=50;
+  ctx.fillStyle='#fff'; ctx.font='20px Tahoma';
+  ctx.fillText('الشهر الحالي: '+thisIncome.toLocaleString('ar'), 850, y); y+=36;
+  ctx.fillText('الشهر السابق: '+lastIncome.toLocaleString('ar'), 850, y); y+=60;
+  ctx.fillStyle='#E9CE86'; ctx.font='bold 24px Tahoma'; ctx.fillText('الملخص المالي حسب العملة:', 850, y); y+=50;
+  ctx.fillStyle='#fff'; ctx.font='20px Tahoma';
+  Object.keys(byCur).forEach(cur=>{
+    const d=byCur[cur]; const net=d.income-d.expense-d.ad;
+    ctx.fillText(`${cur}: صافي ${net.toLocaleString('ar')}`, 850, y); y+=36;
+  });
+  ctx.textAlign='center'; ctx.fillStyle='#8A7431'; ctx.font='16px Tahoma';
+  ctx.fillText('تم إنشاؤه تلقائيًا بواسطة لوحة إدارة أكاديمية أمجاد', 500, 750);
+  const a=document.createElement('a'); a.download=`تقرير_${month}.png`; a.href=canvas.toDataURL('image/png'); a.click();
+}
+
+// ---------- Settings (backup) ----------
+document.getElementById('settingsBtn').addEventListener('click',()=>{
+  const root=document.getElementById('settingsMenuRoot');
+  if(root.innerHTML){root.innerHTML='';return;}
+  root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير Excel/CSV للمحاسب</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;color:#B8391A;" id="lockAppBtn">🔒 قفل البرنامج الآن</div>
+  </div>`;
+  document.getElementById('exportBtn').addEventListener('click',exportBackup);
+  document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
+  document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
+  document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
+  document.getElementById('lockAppBtn').addEventListener('click',()=>{
+    localStorage.removeItem('amjad_unlocked');
+    location.reload();
+  });
+  setTimeout(()=>document.addEventListener('click',closeSettingsOnce,{once:true}),10);
+});
+function closeSettingsOnce(e){ if(!e.target.closest('#settingsMenu')&&e.target.id!=='settingsBtn'){ document.getElementById('settingsMenuRoot').innerHTML=''; } }
+
+function toCsvValue(v){ const s=(v===undefined||v===null)?'':String(v); return '"'+s.replace(/"/g,'""')+'"'; }
+function downloadCsv(filename, rows){
+  const csv='\uFEFF'+rows.map(r=>r.map(toCsvValue).join(',')).join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+}
+function exportCsv(){
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const txRows=[['رقم الفاتورة','التاريخ','النوع','البند','المبلغ','العملة','ملاحظة']];
+  [...transactions].sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{
+    txRows.push([t.invoiceNumber||'',t.date,t.type==='income'?'إيراد':t.type==='expense'?'مصروف':'إعلان',t.category,t.amount,t.currency||'',t.note||'']);
+  });
+  downloadCsv('amjad-transactions-'+dateStr()+'.csv', txRows);
+
+  const stRows=[['الاسم','المادة','الحالة','ولي الأمر','واتساب','تاريخ الإضافة']];
+  students.forEach(s=>{
+    stRows.push([s.name,s.subject||'',s.status||'',s.parentName||'',s.parentPhone||'',s.createdAt?s.createdAt.slice(0,10):'']);
+  });
+  downloadCsv('amjad-students-'+dateStr()+'.csv', stRows);
+  toast('تم تصدير ملفي CSV (المعاملات والطلاب)');
+}
+function printFullBackup(){
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const statusLabel={new:'جديد',active:'نشط',paused:'متوقف'};
+  const now=new Date();
+  let html=`
+    <div style="text-align:center;margin-bottom:24px;">
+      <h1 style="font-size:22px;margin-bottom:4px;">أكاديمية أمجاد — نسخة احتياطية كاملة</h1>
+      <div style="font-size:12px;color:#555;">تاريخ الطباعة: ${now.toLocaleDateString('ar-EG')} ${now.toLocaleTimeString('ar-EG')}</div>
+    </div>
+    <h2 style="font-size:16px;border-bottom:2px solid #C9A227;padding-bottom:4px;margin-bottom:10px;">👥 الطلاب (${students.length})</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:20px;">
+      <tr style="background:#f0eada;"><th style="border:1px solid #ccc;padding:5px;">الاسم</th><th style="border:1px solid #ccc;padding:5px;">المادة</th><th style="border:1px solid #ccc;padding:5px;">الحالة</th><th style="border:1px solid #ccc;padding:5px;">ولي الأمر</th><th style="border:1px solid #ccc;padding:5px;">واتساب</th><th style="border:1px solid #ccc;padding:5px;">باقات</th><th style="border:1px solid #ccc;padding:5px;">ملاحظات</th></tr>
+      ${students.map(s=>`<tr>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(s.name)}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(s.subject||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${statusLabel[s.status]||''}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(s.parentName||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(s.parentPhone||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${(s.packages||[]).map(p=>escapeHtml(p.subject)+' ('+p.sessions.filter(x=>x.status==='attended').length+'/'+p.sessions.length+(p.paid?' ✓مدفوع':' ✗غير مدفوع')+')').join('، ')||'-'}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(s.permanentNotes||'')}</td>
+      </tr>`).join('')}
+    </table>
+    <h2 style="font-size:16px;border-bottom:2px solid #C9A227;padding-bottom:4px;margin-bottom:10px;">👨‍🏫 المعلمين (${teachers.length})</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:20px;">
+      <tr style="background:#f0eada;"><th style="border:1px solid #ccc;padding:5px;">الاسم</th><th style="border:1px solid #ccc;padding:5px;">التخصص</th><th style="border:1px solid #ccc;padding:5px;">واتساب</th><th style="border:1px solid #ccc;padding:5px;">الراتب</th></tr>
+      ${teachers.map(t=>`<tr>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.name)}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.subjects||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.phone||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.salary||'')} ${escapeHtml(t.salaryCurrency||'')}</td>
+      </tr>`).join('')}
+    </table>
+    <h2 style="font-size:16px;border-bottom:2px solid #C9A227;padding-bottom:4px;margin-bottom:10px;">💰 المعاملات المالية (${transactions.length})</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:20px;">
+      <tr style="background:#f0eada;"><th style="border:1px solid #ccc;padding:5px;">النوع</th><th style="border:1px solid #ccc;padding:5px;">البند</th><th style="border:1px solid #ccc;padding:5px;">المبلغ</th><th style="border:1px solid #ccc;padding:5px;">التاريخ</th><th style="border:1px solid #ccc;padding:5px;">ملاحظة</th></tr>
+      ${[...transactions].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<tr>
+        <td style="border:1px solid #ccc;padding:5px;">${t.type==='income'?'إيراد':t.type==='expense'?'مصروف':'إعلان'}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.category)}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${Number(t.amount).toLocaleString('ar')} ${escapeHtml(t.currency||'')}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${t.date}</td>
+        <td style="border:1px solid #ccc;padding:5px;">${escapeHtml(t.note||'')}</td>
+      </tr>`).join('')}
+    </table>
+  `;
+  const printDiv=document.getElementById('fullBackupPrint');
+  printDiv.innerHTML=html;
+  document.body.classList.add('printing-backup');
+  window.print();
+}
+window.addEventListener('afterprint',()=>{ document.body.classList.remove('printing-backup'); });
+
+function exportBackup(){
+  const backup={students,transactions,teachers,bookings,exportedAt:new Date().toISOString()};
+  const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  a.href=url; a.download=`amjad-backup-${dateStr()}.json`; a.click(); URL.revokeObjectURL(url);
+  document.getElementById('settingsMenuRoot').innerHTML=''; toast('تم تنزيل النسخة الاحتياطية');
+}
+document.getElementById('importFile').addEventListener('change',e=>{
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=evt=>{
+    try{
+      const data=JSON.parse(evt.target.result);
+      if(Array.isArray(data.students)){
+        students=data.students.map(migrateStudent);
+        transactions=Array.isArray(data.transactions)?data.transactions:[];
+        teachers=Array.isArray(data.teachers)?data.teachers:[];
+        bookings=Array.isArray(data.bookings)?data.bookings:[];
+        saveStudents(); saveTransactions(); saveTeachers(); saveBookings(); render(); toast('تم الاستيراد');
+      } else alert('ملف غير صالح');
+    }catch(err){ alert('تعذر قراءة الملف'); }
+  };
+  reader.readAsText(file);
+  document.getElementById('settingsMenuRoot').innerHTML=''; e.target.value='';
+});
+
+// ---------- FAB ----------
+document.getElementById('fabAdd').addEventListener('click',()=>{
+  if(currentTab==='finance') openTxForm();
+  else if(currentTab==='teachers') openTeacherForm(null);
+  else openForm(null);
+});
+
+// ---------- notifications ----------
+function fireNotification(title,body){
+  if('Notification' in window && Notification.permission==='granted'){
+    if(navigator.serviceWorker && navigator.serviceWorker.controller){
+      navigator.serviceWorker.ready.then(reg=>reg.showNotification(title,{body,icon:'icon-192.png',dir:'rtl'}));
+    } else { new Notification(title,{body,icon:'icon-192.png'}); }
+  }
+}
+const notifBanner=document.getElementById('notifBanner');
+if('Notification' in window && Notification.permission!=='granted' && Notification.permission!=='denied') notifBanner.style.display='block';
+notifBanner.addEventListener('click',()=>Notification.requestPermission().then(()=>notifBanner.style.display='none'));
+setInterval(render,30000);
+if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(()=>{});
+setInterval(()=>{
+  const key='amjad_notes_'+dateStr();
+  if(localStorage.getItem(key)===null){ notes={}; completed={}; notifiedFlags={}; render(); }
+},60000);
+
+// ---------- Lock screen (password gate) ----------
+const LOCK_HASH = 'fe870f2dca8646dfb510787982d54f24d05360000aa6651a0489cd9158302189';
+async function sha256(text){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function tryUnlock(){
+  const val = document.getElementById('lockPassInput').value;
+  const hash = await sha256(val);
+  if(hash === LOCK_HASH){
+    localStorage.setItem('amjad_unlocked','true');
+    document.getElementById('lockScreen').style.display='none';
+    startApp();
+  } else {
+    document.getElementById('lockError').style.display='block';
+    document.getElementById('lockPassInput').value='';
+  }
+}
+document.getElementById('lockSubmitBtn').addEventListener('click', tryUnlock);
+document.getElementById('lockPassInput').addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
+
+function startApp(){
+  render();
+  loadFromCloud();
+  setInterval(pollNewBookings, 45000);
+}
+
+async function pollNewBookings(){
+  if(!supabaseClient) return;
+  try{
+    const {data,error} = await supabaseClient.from('bookings').select('*');
+    if(error || !data) return;
+    const newPending = data.filter(b=>b.status==='pending' && !seenBookingIds.has(b.id));
+    if(newPending.length){
+      newPending.forEach(b=>{
+        fireNotification('📅 حجز جديد!', `${b.name} — ${b.subject||''} (${b.preferred_day||''} ${b.preferred_time||''})`);
+        seenBookingIds.add(b.id);
+      });
+      localStorage.setItem('amjad_seen_bookings', JSON.stringify([...seenBookingIds]));
+    }
+    bookings = data;
+    localStorage.setItem('amjad_bookings', JSON.stringify(bookings));
+    if(currentView!=='profile'){
+      const bkBtn = document.getElementById('bookingsTabBtn');
+      const pendingCount = bookings.filter(b=>b.status==='pending').length;
+      if(bkBtn) bkBtn.innerHTML = `📅 الحجوزات${pendingCount>0?` <span style="background:#B8391A;color:#fff;border-radius:10px;padding:1px 6px;font-size:10.5px;">${pendingCount}</span>`:''}`;
+      if(currentTab==='bookings') render();
+    }
+  }catch(e){ console.error('poll bookings failed', e); }
+}
+
+if(localStorage.getItem('amjad_unlocked')==='true'){
+  document.getElementById('lockScreen').style.display='none';
+  startApp();
+} else {
+  document.getElementById('lockPassInput').focus();
+}
+</script>
+</body>
+</html>
