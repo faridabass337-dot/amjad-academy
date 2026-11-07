@@ -139,10 +139,11 @@ body{font-family:Tahoma, Arial, sans-serif; background:var(--paper); color:var(-
 <div id="lockScreen" style="position:fixed;inset:0;background:linear-gradient(135deg,#0B1B33,#132C56);z-index:999;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
   <img src="icon-192.png" style="width:90px;height:90px;border-radius:50%;box-shadow:0 0 0 3px #C9A227;margin-bottom:20px;">
   <div style="color:#fff;font-size:19px;font-weight:800;margin-bottom:6px;">أكاديمية أمجاد</div>
-  <div style="color:#C9D0DE;font-size:13px;margin-bottom:24px;">البرنامج ده خاص — من فضلك ادخل كلمة السر</div>
-  <input type="password" id="lockPassInput" placeholder="كلمة السر" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:1px solid #3a4d70;background:#132C56;color:#fff;font-size:15px;text-align:center;margin-bottom:14px;">
-  <button id="lockSubmitBtn" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:none;background:linear-gradient(90deg,#E9CE86,#C9A227);color:#0B1B33;font-weight:800;font-size:15px;cursor:pointer;">دخول</button>
-  <div id="lockError" style="color:#E9A08A;font-size:12.5px;margin-top:12px;display:none;">كلمة السر غلط، جرب تاني</div>
+  <div style="color:#C9D0DE;font-size:13px;margin-bottom:24px;">سجّل دخولك للمتابعة</div>
+  <input type="email" id="loginEmail" placeholder="الإيميل" autocomplete="username" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:1px solid #3a4d70;background:#132C56;color:#fff;font-size:15px;text-align:center;margin-bottom:10px;">
+  <input type="password" id="loginPassInput" placeholder="كلمة السر" autocomplete="current-password" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:1px solid #3a4d70;background:#132C56;color:#fff;font-size:15px;text-align:center;margin-bottom:14px;">
+  <button id="loginSubmitBtn" style="width:100%;max-width:280px;padding:14px;border-radius:10px;border:none;background:linear-gradient(90deg,#E9CE86,#C9A227);color:#0B1B33;font-weight:800;font-size:15px;cursor:pointer;">دخول</button>
+  <div id="lockError" style="color:#E9A08A;font-size:12.5px;margin-top:12px;display:none;"></div>
 </div>
 
 <div id="notifBanner" style="display:none; position:fixed; top:0; right:0; left:0; background:var(--gold); color:var(--ink); text-align:center; padding:9px; font-size:12.5px; font-weight:700; cursor:pointer; z-index:60;">🔔 فعّل الإشعارات — دوس هنا</div>
@@ -1242,8 +1243,8 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
   document.getElementById('lockAppBtn').addEventListener('click',()=>{
-    localStorage.removeItem('amjad_unlocked');
-    location.reload();
+    if(supabaseClient) supabaseClient.auth.signOut().finally(()=>location.reload());
+    else location.reload();
   });
   setTimeout(()=>document.addEventListener('click',closeSettingsOnce,{once:true}),10);
 });
@@ -1374,26 +1375,45 @@ setInterval(()=>{
   if(localStorage.getItem(key)===null){ notes={}; completed={}; notifiedFlags={}; render(); }
 },60000);
 
-// ---------- Lock screen (password gate) ----------
-const LOCK_HASH = 'fe870f2dca8646dfb510787982d54f24d05360000aa6651a0489cd9158302189';
-async function sha256(text){
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+// ---------- Login (Supabase Auth + profiles role) ----------
+let currentUser = null; // {id, email, role, full_name}
+
+async function loadCurrentUserProfile(){
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  const user = sessionData && sessionData.session ? sessionData.session.user : null;
+  if(!user) return false;
+  const { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single();
+  if(error || !profile || !profile.active) return false;
+  currentUser = { id: user.id, email: user.email, role: profile.role, full_name: profile.full_name };
+  return true;
 }
-async function tryUnlock(){
-  const val = document.getElementById('lockPassInput').value;
-  const hash = await sha256(val);
-  if(hash === LOCK_HASH){
-    localStorage.setItem('amjad_unlocked','true');
-    document.getElementById('lockScreen').style.display='none';
-    startApp();
-  } else {
-    document.getElementById('lockError').style.display='block';
-    document.getElementById('lockPassInput').value='';
+
+async function tryLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassInput').value;
+  const errBox = document.getElementById('lockError');
+  errBox.style.display='none';
+  if(!email || !password){ errBox.textContent='من فضلك اكتب الإيميل وكلمة السر'; errBox.style.display='block'; return; }
+  if(!supabaseClient){ errBox.textContent='تعذر الاتصال — جرب تاني'; errBox.style.display='block'; return; }
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if(error){
+    errBox.textContent='الإيميل أو كلمة السر غلط';
+    errBox.style.display='block';
+    document.getElementById('loginPassInput').value='';
+    return;
   }
+  const ok = await loadCurrentUserProfile();
+  if(!ok){
+    errBox.textContent='الحساب ده لسه مش مفعّل — كلم المدير العام';
+    errBox.style.display='block';
+    await supabaseClient.auth.signOut();
+    return;
+  }
+  document.getElementById('lockScreen').style.display='none';
+  startApp();
 }
-document.getElementById('lockSubmitBtn').addEventListener('click', tryUnlock);
-document.getElementById('lockPassInput').addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
+document.getElementById('loginSubmitBtn').addEventListener('click', tryLogin);
+document.getElementById('loginPassInput').addEventListener('keydown', e=>{ if(e.key==='Enter') tryLogin(); });
 
 function startApp(){
   render();
@@ -1425,12 +1445,16 @@ async function pollNewBookings(){
   }catch(e){ console.error('poll bookings failed', e); }
 }
 
-if(localStorage.getItem('amjad_unlocked')==='true'){
-  document.getElementById('lockScreen').style.display='none';
-  startApp();
-} else {
-  document.getElementById('lockPassInput').focus();
-}
+(async function initAuthGate(){
+  if(!supabaseClient){ document.getElementById('loginEmail').focus(); return; }
+  const ok = await loadCurrentUserProfile();
+  if(ok){
+    document.getElementById('lockScreen').style.display='none';
+    startApp();
+  } else {
+    document.getElementById('loginEmail').focus();
+  }
+})();
 </script>
 </body>
 </html>
