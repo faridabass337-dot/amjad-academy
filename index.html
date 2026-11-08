@@ -285,7 +285,7 @@ async function loadFromCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();render();return;}
   try{
     const [sr,tr,tcr,br]=await Promise.all([
-      supabaseClient.from('students').select('*'),
+      supabaseClient.rpc('get_students'),
       supabaseClient.from('transactions').select('*'),
       supabaseClient.from('teachers').select('*'),
       supabaseClient.from('bookings').select('*'),
