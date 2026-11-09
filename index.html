@@ -304,7 +304,10 @@ async function loadFromCloud(){
       const cloudPkgCount = (cloudS.packages||[]).length;
       return cloudPkgCount < localPkgCount;
     });
-    if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));}
+    // Non-admin users only receive their assigned students, so a shorter list is correct, not data loss.
+    if(!isAdmin()){
+      students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));
+    } else if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));}
     // Non-admin users are DB-restricted from reading financial tables (transactions) — a shorter/empty
     // result for them is correct permission filtering, not data loss, so never fall back to stale local cache.
     if(!isAdmin()){
