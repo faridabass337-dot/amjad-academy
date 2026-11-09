@@ -287,7 +287,7 @@ async function loadFromCloud(){
     const [sr,tr,tcr,br]=await Promise.all([
       supabaseClient.rpc('get_students'),
       supabaseClient.from('transactions').select('*'),
-      supabaseClient.from('teachers').select('*'),
+      supabaseClient.rpc('get_teachers'),
       supabaseClient.from('bookings').select('*'),
     ]);
     if(sr.error) throw sr.error;
@@ -313,7 +313,10 @@ async function loadFromCloud(){
     if(!isAdmin()){
       transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));
     } else if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));}
-    if(cloudTeachers!==null){ if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers));} }
+    if(cloudTeachers!==null){
+      if(!isAdmin()){ teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); }
+      else if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers));}
+    }
     if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings));} }
     cloudOnline=true;
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
@@ -965,9 +968,9 @@ function renderTeachers(c){
         ${t.subjects?`<div class="meta">📚 ${escapeHtml(t.subjects)}</div>`:''}
         <div class="meta">👥 ${cnt} طالب</div>
         ${t.phone?`<div class="meta">📱 ${escapeHtml(t.phone)} ${wa?`· <a href="${wa}" target="_blank">واتساب</a>`:''}</div>`:''}
-        ${t.salary?`<div class="meta">💰 ${escapeHtml(t.salary)} ${escapeHtml(t.salaryCurrency||'')}</div>`:''}
+        ${(isAdmin()&&t.salary)?`<div class="meta">💰 ${escapeHtml(t.salary)} ${escapeHtml(t.salaryCurrency||'')}</div>`:''}
       </div>
-      <button class="btn-outline" data-pay-salary="${t.id}">تسجيل راتب</button>
+      ${isAdmin()?`<button class="btn-outline" data-pay-salary="${t.id}">تسجيل راتب</button>`:''}
       <button class="btn-outline" data-edit-teacher="${t.id}">تعديل</button>
       <button class="icon-btn" data-del-teacher="${t.id}">🗑</button>
     `;
@@ -997,10 +1000,10 @@ function openTeacherForm(id){
         <label class="field-label">الاسم</label><input class="field-input" id="tf_name" value="${escapeHtml(form.name)}">
         <label class="field-label">التخصص</label><input class="field-input" id="tf_subjects" value="${escapeHtml(form.subjects)}">
         <label class="field-label">واتساب</label><input class="field-input" id="tf_phone" value="${escapeHtml(form.phone)}">
-        <div class="field-row">
+        ${isAdmin()?`<div class="field-row">
           <div><label class="field-label">الراتب</label><input class="field-input" id="tf_salary" value="${escapeHtml(form.salary)}"></div>
           <div><label class="field-label">العملة</label><select class="field-input" id="tf_currency">${CURRENCIES.map(c=>`<option value="${c}" ${c===form.salaryCurrency?'selected':''}>${c}</option>`).join('')}</select></div>
-        </div>
+        </div>`:''}
         <label class="field-label">ملاحظات</label><textarea class="field-input" id="tf_notes">${escapeHtml(form.notes)}</textarea>
         <button class="submit-btn" id="submitTeacher">حفظ</button>
       </div>
@@ -1009,7 +1012,8 @@ function openTeacherForm(id){
   document.getElementById('closeModal').addEventListener('click',closeForm);
   document.getElementById('submitTeacher').addEventListener('click',()=>{
     const name=document.getElementById('tf_name').value.trim(); if(!name)return;
-    const extra={name,subjects:document.getElementById('tf_subjects').value.trim(),phone:document.getElementById('tf_phone').value.trim(),salary:document.getElementById('tf_salary').value.trim(),salaryCurrency:document.getElementById('tf_currency').value,notes:document.getElementById('tf_notes').value.trim()};
+    const extra={name,subjects:document.getElementById('tf_subjects').value.trim(),phone:document.getElementById('tf_phone').value.trim(),notes:document.getElementById('tf_notes').value.trim()};
+    if(isAdmin()){ extra.salary=document.getElementById('tf_salary').value.trim(); extra.salaryCurrency=document.getElementById('tf_currency').value; }
     if(editingId){ teachers=teachers.map(t=>t.id===editingId?{...t,...extra}:t); } else { teachers.push({id:uid(),...extra}); }
     saveTeachers(); closeForm(); render(); toast('تم الحفظ');
   });
