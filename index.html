@@ -306,18 +306,18 @@ async function loadFromCloud(){
     });
     // Non-admin users only receive their assigned students, so a shorter list is correct, not data loss.
     if(!isAdmin()){
-      students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));
-    } else if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));}
+      students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(s=>s.id));
+    } else if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(s=>s.id));}
     // Non-admin users are DB-restricted from reading financial tables (transactions) — a shorter/empty
     // result for them is correct permission filtering, not data loss, so never fall back to stale local cache.
     if(!isAdmin()){
-      transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));
-    } else if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));}
+      transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',[]);
+    } else if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',transactions.map(t=>t.id));}
     if(cloudTeachers!==null){
-      if(!isAdmin()){ teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); }
-      else if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers));}
+      if(!isAdmin()){ teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); setKnown('teachers',teachers.map(t=>t.id)); }
+      else if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); setKnown('teachers',teachers.map(t=>t.id));}
     }
-    if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings));} }
+    if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings)); setKnown('bookings',bookings.map(b=>b.id));} }
     cloudOnline=true;
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
   }catch(e){ cloudOnline=false; console.error('cloud load failed',e); }
