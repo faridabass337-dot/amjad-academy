@@ -305,11 +305,15 @@ async function loadFromCloud(){
       return cloudPkgCount < localPkgCount;
     });
     if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students));}
-    if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));}
+    // Non-admin users are DB-restricted from reading financial tables (transactions) — a shorter/empty
+    // result for them is correct permission filtering, not data loss, so never fall back to stale local cache.
+    if(!isAdmin()){
+      transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));
+    } else if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions));}
     if(cloudTeachers!==null){ if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers));} }
     if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings));} }
     cloudOnline=true;
-    if(needsResync){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
+    if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
   }catch(e){ cloudOnline=false; console.error('cloud load failed',e); }
   updateCloudStatus();
   render();
@@ -365,8 +369,9 @@ document.getElementById('moreTabBtn').addEventListener('click',(e)=>{
   e.stopPropagation();
   const root = document.getElementById('moreMenuRoot');
   if(root.innerHTML){ root.innerHTML=''; return; }
+  const visibleTabs = MORE_TABS.filter(t=> isAdmin() || t.key!=='stats');
   root.innerHTML = `<div id="moreMenu" style="position:fixed;top:150px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:85;overflow:hidden;min-width:170px;">
-    ${MORE_TABS.map(t=>`<div class="more-item" data-more="${t.key}" style="padding:13px 16px;font-size:14px;cursor:pointer;border-bottom:1px solid #eee;color:#0B1B33;">${t.label}</div>`).join('')}
+    ${visibleTabs.map(t=>`<div class="more-item" data-more="${t.key}" style="padding:13px 16px;font-size:14px;cursor:pointer;border-bottom:1px solid #eee;color:#0B1B33;">${t.label}</div>`).join('')}
   </div>`;
   root.querySelectorAll('[data-more]').forEach(item=>item.addEventListener('click',()=>{
     currentView='tabs'; currentTab=item.dataset.more;
@@ -393,6 +398,7 @@ function render(){
     return;
   }
   tabsBar.style.display='flex';
+  applyRoleUI();
   fab.style.display = (currentTab==='stats'||currentTab==='week') ? 'none' : 'flex';
   const pendingCount = bookings.filter(b=>b.status==='pending').length;
   const bkBtn = document.getElementById('bookingsTabBtn');
@@ -717,18 +723,18 @@ function renderProfile(c){
           <div class="package-title">${escapeHtml(p.subject)} ${p.active?'':'<span style="font-size:11px;color:var(--muted);">(منتهية)</span>'}</div>
           <div class="package-sub">${teacher?'👨‍🏫 '+escapeHtml(teacher.name):'بدون معلم'} ${p.whatsappGroup?' · <a href="'+escapeHtml(p.whatsappGroup)+'" target="_blank">جروب الواتساب</a>':''}</div>
         </div>
-        <span class="pay-badge ${p.paid?'pay-paid':'pay-unpaid'}">${p.paid?'✓ مدفوع':'غير مدفوع'}</span>
+        ${isAdmin()?`<span class="pay-badge ${p.paid?'pay-paid':'pay-unpaid'}">${p.paid?'✓ مدفوع':'غير مدفوع'}</span>`:''}
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;"></div></div>
-      <div class="package-sub">${doneCount}/${p.sessions.length} حصة · ${escapeHtml(p.amount||'')} ${escapeHtml(p.currency||'')} ${p.amountEGP?' ('+escapeHtml(p.amountEGP)+' ج.م)':''}</div>
+      <div class="package-sub">${doneCount}/${p.sessions.length} حصة${isAdmin()?' · '+escapeHtml(p.amount||'')+' '+escapeHtml(p.currency||'')+(p.amountEGP?' ('+escapeHtml(p.amountEGP)+' ج.م)':''):''}</div>
       <div class="session-list">
         ${p.sessions.map((ss,i)=>`<div class="session-chip ${ss.status==='attended'?'attended':ss.status==='absent'?'absent':''}" data-pkg="${p.id}" data-sess="${i}" title="${ss.date}">${i+1}</div>`).join('')}
       </div>
-      ${p.receipt?`<img class="receipt-thumb" src="${p.receipt}" data-view-receipt="${p.id}">`:''}
+      ${(isAdmin()&&p.receipt)?`<img class="receipt-thumb" src="${p.receipt}" data-view-receipt="${p.id}">`:''}
       ${(p.active && !complete && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)<=2 && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)>0)?`<div class="renew-warning">⏰ باقي ${p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length} حصة بس على انتهاء الباقة</div>`:''}
       <div class="package-footer">
-        <button class="mini-btn ${p.paid?'':'filled'}" data-toggle-paid="${p.id}">${p.paid?'إلغاء الدفع':'تسجيل كمدفوع'}</button>
-        <button class="mini-btn" data-upload-receipt="${p.id}">📎 إيصال</button>
+        ${isAdmin()?`<button class="mini-btn ${p.paid?'':'filled'}" data-toggle-paid="${p.id}">${p.paid?'إلغاء الدفع':'تسجيل كمدفوع'}</button>
+        <button class="mini-btn" data-upload-receipt="${p.id}">📎 إيصال</button>`:''}
         <button class="mini-btn" data-remind="${p.id}">📲 تذكير تجديد</button>
         <button class="mini-btn" data-makeup="${p.id}">➕ حصة تعويضية</button>
         ${complete?`<button class="mini-btn filled" data-cert="${p.id}">🎓 شهادة تقدير</button><button class="mini-btn" data-renew="${p.id}">🔁 باقة جديدة</button>`:''}
@@ -1232,16 +1238,18 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   const root=document.getElementById('settingsMenuRoot');
   if(root.innerHTML){root.innerHTML='';return;}
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
-    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
+    ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
-    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير Excel/CSV للمحاسب</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير Excel/CSV للمحاسب</div>`:''}
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;color:#B8391A;" id="lockAppBtn">🔒 قفل البرنامج الآن</div>
   </div>`;
+  if(isAdmin()){
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
   document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
+  }
   document.getElementById('lockAppBtn').addEventListener('click',()=>{
     if(supabaseClient) supabaseClient.auth.signOut().finally(()=>location.reload());
     else location.reload();
@@ -1377,6 +1385,12 @@ setInterval(()=>{
 
 // ---------- Login (Supabase Auth + profiles role) ----------
 let currentUser = null; // {id, email, role, full_name}
+function isAdmin(){ return !!(currentUser && currentUser.role==='admin'); }
+function applyRoleUI(){
+  const financeBtn = document.querySelector('.tabs .tab-btn[data-tab="finance"]');
+  if(financeBtn) financeBtn.style.display = isAdmin() ? '' : 'none';
+  if(!isAdmin() && (currentTab==='finance' || currentTab==='stats')) currentTab='today';
+}
 
 async function loadCurrentUserProfile(){
   const { data: sessionData } = await supabaseClient.auth.getSession();
@@ -1385,6 +1399,17 @@ async function loadCurrentUserProfile(){
   const { data: profile, error } = await supabaseClient.from('profiles').select('*').eq('id', user.id).single();
   if(error || !profile || !profile.active) return false;
   currentUser = { id: user.id, email: user.email, role: profile.role, full_name: profile.full_name };
+  // If this device previously had a different account's data cached locally, wipe it so a lower-privilege
+  // user never renders another account's stale cached data (e.g. a supervisor seeing an admin's cached finances).
+  const lastUid = localStorage.getItem('amjad_last_uid');
+  if(lastUid !== currentUser.id){
+    localStorage.removeItem('amjad_students');
+    localStorage.removeItem('amjad_transactions');
+    localStorage.removeItem('amjad_teachers');
+    localStorage.removeItem('amjad_bookings');
+    students=[]; transactions=[]; teachers=[]; bookings=[];
+    localStorage.setItem('amjad_last_uid', currentUser.id);
+  }
   return true;
 }
 
