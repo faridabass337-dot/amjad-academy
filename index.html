@@ -367,12 +367,14 @@ const MORE_TABS = [
   {key:'teachers', label:'👨‍🏫 المعلمين'},
   {key:'week', label:'📆 الأسبوع'},
   {key:'stats', label:'📊 إحصائيات'},
+  {key:'supervisors', label:'🛡️ المشرفين'},
 ];
+const ADMIN_ONLY_TABS = ['stats','supervisors'];
 document.getElementById('moreTabBtn').addEventListener('click',(e)=>{
   e.stopPropagation();
   const root = document.getElementById('moreMenuRoot');
   if(root.innerHTML){ root.innerHTML=''; return; }
-  const visibleTabs = MORE_TABS.filter(t=> isAdmin() || t.key!=='stats');
+  const visibleTabs = MORE_TABS.filter(t=> isAdmin() || !ADMIN_ONLY_TABS.includes(t.key));
   root.innerHTML = `<div id="moreMenu" style="position:fixed;top:150px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.25);z-index:85;overflow:hidden;min-width:170px;">
     ${visibleTabs.map(t=>`<div class="more-item" data-more="${t.key}" style="padding:13px 16px;font-size:14px;cursor:pointer;border-bottom:1px solid #eee;color:#0B1B33;">${t.label}</div>`).join('')}
   </div>`;
@@ -402,7 +404,7 @@ function render(){
   }
   tabsBar.style.display='flex';
   applyRoleUI();
-  fab.style.display = (currentTab==='stats'||currentTab==='week') ? 'none' : 'flex';
+  fab.style.display = (currentTab==='stats'||currentTab==='week'||currentTab==='supervisors') ? 'none' : 'flex';
   const pendingCount = bookings.filter(b=>b.status==='pending').length;
   const bkBtn = document.getElementById('bookingsTabBtn');
   if(bkBtn) bkBtn.innerHTML = `📅 الحجوزات${pendingCount>0?` <span style="background:#B8391A;color:#fff;border-radius:10px;padding:1px 6px;font-size:10.5px;">${pendingCount}</span>`:''}`;
@@ -412,6 +414,7 @@ function render(){
   else if(currentTab==='finance') renderFinance(c);
   else if(currentTab==='bookings') renderBookings(c);
   else if(currentTab==='stats') renderStats(c);
+  else if(currentTab==='supervisors') renderSupervisors(c);
   else renderWeek(c);
 }
 
@@ -1167,6 +1170,69 @@ function renderBookings(c){
   }));
 }
 
+// ---------- Supervisors management (admin only) ----------
+async function renderSupervisors(c){
+  if(!isAdmin()) return;
+  c.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">جاري التحميل...</div>';
+  const [pr,ar]=await Promise.all([
+    supabaseClient.from('profiles').select('*').eq('role','supervisor'),
+    supabaseClient.from('supervisor_students').select('*')
+  ]);
+  if(pr.error||ar.error){ c.innerHTML='<div style="text-align:center;padding:30px;color:#B8391A;font-size:13px;">تعذر تحميل بيانات المشرفين</div>'; return; }
+  const sups=pr.data||[]; let assigns=ar.data||[];
+  if(!sups.length){ c.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">لا يوجد مشرفين بعد. أضف المستخدم من Supabase ثم سجّله كمشرف.</div>'; return; }
+  const sorted=[...students].sort((a,b)=>(a.name||'').localeCompare(b.name||'','ar'));
+  c.innerHTML=sups.map(sp=>{
+    const mine=new Set(assigns.filter(a=>a.supervisor_id===sp.id).map(a=>a.student_id));
+    const label=sp.full_name||('مشرف '+String(sp.id).slice(0,6));
+    return `<div class="package-card" data-sup="${sp.id}">
+      <div class="package-head">
+        <div><div class="package-title">🛡️ ${escapeHtml(label)}</div>
+        <div class="package-sub" data-count>الطلاب المعيّنين: ${mine.size}</div></div>
+        <span class="pay-badge ${sp.active?'pay-paid':'pay-unpaid'}">${sp.active?'مفعّل':'موقوف'}</span>
+      </div>
+      <div class="package-footer">
+        <button class="mini-btn ${sp.active?'':'filled'}" data-sup-toggle="${sp.id}">${sp.active?'إيقاف الحساب':'تفعيل الحساب'}</button>
+        <button class="mini-btn" data-sup-rename="${sp.id}">✏️ تسمية</button>
+      </div>
+      <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">تعيين الطلاب</summary>
+        <div style="max-height:320px;overflow:auto;margin-top:8px;">
+        ${sorted.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #F0EAD6;font-size:13px;"><input type="checkbox" data-assign="${sp.id}" data-stu="${escapeHtml(String(s.id))}" ${mine.has(s.id)?'checked':''}> ${escapeHtml(s.name||'')}</label>`).join('')}
+        </div>
+      </details>
+    </div>`;
+  }).join('');
+  c.querySelectorAll('[data-assign]').forEach(cb=>cb.addEventListener('change',async()=>{
+    const sid=cb.dataset.assign, stu=cb.dataset.stu;
+    cb.disabled=true;
+    const res = cb.checked
+      ? await supabaseClient.from('supervisor_students').insert({supervisor_id:sid,student_id:stu})
+      : await supabaseClient.from('supervisor_students').delete().eq('supervisor_id',sid).eq('student_id',stu);
+    cb.disabled=false;
+    if(res.error){ cb.checked=!cb.checked; toast('تعذر الحفظ'); return; }
+    if(cb.checked) assigns.push({supervisor_id:sid,student_id:stu});
+    else assigns=assigns.filter(a=>!(a.supervisor_id===sid&&a.student_id===stu));
+    const card=cb.closest('[data-sup]');
+    card.querySelector('[data-count]').textContent='الطلاب المعيّنين: '+assigns.filter(a=>a.supervisor_id===sid).length;
+    toast('تم الحفظ');
+  }));
+  c.querySelectorAll('[data-sup-toggle]').forEach(b=>b.addEventListener('click',async()=>{
+    const sp=sups.find(x=>x.id===b.dataset.supToggle);
+    const { error } = await supabaseClient.from('profiles').update({active:!sp.active}).eq('id',sp.id);
+    if(error){ toast('تعذر التحديث'); return; }
+    toast(sp.active?'تم إيقاف الحساب':'تم تفعيل الحساب');
+    renderSupervisors(c);
+  }));
+  c.querySelectorAll('[data-sup-rename]').forEach(b=>b.addEventListener('click',async()=>{
+    const sp=sups.find(x=>x.id===b.dataset.supRename);
+    const nm=prompt('اسم المشرف:', sp.full_name||'');
+    if(nm===null) return;
+    const { error } = await supabaseClient.from('profiles').update({full_name:nm.trim()}).eq('id',sp.id);
+    if(error){ toast('تعذر حفظ الاسم'); return; }
+    renderSupervisors(c);
+  }));
+}
+
 function renderStats(c){
   const total=students.length, active=students.filter(s=>s.status==='active').length, nw=students.filter(s=>s.status==='new').length, paused=students.filter(s=>s.status==='paused').length;
   const byCur={};
@@ -1392,7 +1458,7 @@ function isAdmin(){ return !!(currentUser && currentUser.role==='admin'); }
 function applyRoleUI(){
   const financeBtn = document.querySelector('.tabs .tab-btn[data-tab="finance"]');
   if(financeBtn) financeBtn.style.display = isAdmin() ? '' : 'none';
-  if(!isAdmin() && (currentTab==='finance' || currentTab==='stats')) currentTab='today';
+  if(!isAdmin() && (currentTab==='finance' || currentTab==='stats' || currentTab==='supervisors')) currentTab='today';
 }
 
 async function loadCurrentUserProfile(){
