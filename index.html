@@ -236,12 +236,23 @@ function flashSave(){ const el=document.getElementById('saveFlag'); el.classList
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
 function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?'☁️ متصل':'⚠️ غير متصل (محلي)'; el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
 
+
+/* حذف آمن: لا يُحذف شيء من السيرفر إلا لو المستخدم حذفه صراحةً. الطلاب والمعلمون حذف ناعم (deleted_at) */
+function queueDelete(table,id){ try{ const k='amjad_pdel_'+table; const a=JSON.parse(localStorage.getItem(k)||'[]'); if(!a.includes(id)) a.push(id); localStorage.setItem(k,JSON.stringify(a)); }catch(e){} }
+async function flushDeletes(table,soft){
+  const k='amjad_pdel_'+table; let ids=[]; try{ ids=JSON.parse(localStorage.getItem(k)||'[]'); }catch(e){}
+  if(!ids.length) return;
+  const q = soft ? supabaseClient.from(table).update({deleted_at:new Date().toISOString()}).in('id',ids)
+                 : supabaseClient.from(table).delete().in('id',ids);
+  const {error}=await q;
+  if(error){ console.error('delete flush failed',table,error); return; }
+  localStorage.removeItem(k);
+}
 async function syncStudentsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
     if(students.length){ const {error}=await supabaseClient.from('students').upsert(students,{onConflict:'id'}); if(error)throw error; }
-    const {data:remote,error:fe}=await supabaseClient.from('students').select('id');
-    if(!fe&&remote){ const ids=new Set(students.map(s=>s.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('students').delete().in('id',del); }
+    await flushDeletes('students',true);
     cloudOnline=true;
   }catch(e){ cloudOnline=false; console.error('sync students failed, remote untouched',e); }
   updateCloudStatus();
@@ -250,8 +261,7 @@ async function syncTransactionsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
     if(transactions.length){ const {error}=await supabaseClient.from('transactions').upsert(transactions,{onConflict:'id'}); if(error)throw error; }
-    const {data:remote,error:fe}=await supabaseClient.from('transactions').select('id');
-    if(!fe&&remote){ const ids=new Set(transactions.map(t=>t.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('transactions').delete().in('id',del); }
+    await flushDeletes('transactions',false);
     cloudOnline=true;
   }catch(e){ cloudOnline=false; console.error('sync tx failed',e); }
   updateCloudStatus();
@@ -260,8 +270,7 @@ async function syncTeachersToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
     if(teachers.length){ const {error}=await supabaseClient.from('teachers').upsert(teachers,{onConflict:'id'}); if(error)throw error; }
-    const {data:remote,error:fe}=await supabaseClient.from('teachers').select('id');
-    if(!fe&&remote){ const ids=new Set(teachers.map(t=>t.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('teachers').delete().in('id',del); }
+    await flushDeletes('teachers',true);
     cloudOnline=true;
   }catch(e){ cloudOnline=false; console.error('sync teachers failed',e); }
   updateCloudStatus();
@@ -275,8 +284,7 @@ async function syncBookingsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
     if(bookings.length){ const {error}=await supabaseClient.from('bookings').upsert(bookings,{onConflict:'id'}); if(error)throw error; }
-    const {data:remote,error:fe}=await supabaseClient.from('bookings').select('id');
-    if(!fe&&remote){ const ids=new Set(bookings.map(b=>b.id)); const del=remote.filter(r=>!ids.has(r.id)).map(r=>r.id); if(del.length) await supabaseClient.from('bookings').delete().in('id',del); }
+    await flushDeletes('bookings',false);
     cloudOnline=true;
   }catch(e){ cloudOnline=false; console.error('sync bookings failed',e); }
   updateCloudStatus();
@@ -535,7 +543,7 @@ function renderStudents(c){
   c.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openForm(b.dataset.edit); }));
   c.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',e=>{
     e.stopPropagation();
-    if(confirm('متأكد إنك عايز تحذف الطالب ده؟')){ students=students.filter(s=>s.id!==b.dataset.del); saveStudents(); render(); }
+    if(confirm('متأكد إنك عايز تحذف الطالب ده؟')){ queueDelete('students',b.dataset.del); students=students.filter(s=>s.id!==b.dataset.del); saveStudents(); render(); }
   }));
 }
 
@@ -979,7 +987,7 @@ function renderTeachers(c){
   c.querySelectorAll('[data-edit-teacher]').forEach(b=>b.addEventListener('click',()=>openTeacherForm(b.dataset.editTeacher)));
   c.querySelectorAll('[data-del-teacher]').forEach(b=>b.addEventListener('click',()=>{
     const id=b.dataset.delTeacher;
-    if(confirm('متأكد من حذف المعلم؟')){ teachers=teachers.filter(t=>t.id!==id); saveTeachers(); render(); }
+    if(confirm('متأكد من حذف المعلم؟')){ queueDelete('teachers',id); teachers=teachers.filter(t=>t.id!==id); saveTeachers(); render(); }
   }));
   c.querySelectorAll('[data-pay-salary]').forEach(b=>b.addEventListener('click',()=>{
     const t=teachers.find(x=>x.id===b.dataset.paySalary);
@@ -1071,7 +1079,7 @@ function renderFinance(c){
       `;
       txList.appendChild(row);
     });
-    txList.querySelectorAll('[data-deltx]').forEach(b=>b.addEventListener('click',()=>{ transactions=transactions.filter(t=>t.id!==b.dataset.deltx); saveTransactions(); render(); }));
+    txList.querySelectorAll('[data-deltx]').forEach(b=>b.addEventListener('click',()=>{ queueDelete('transactions',b.dataset.deltx); transactions=transactions.filter(t=>t.id!==b.dataset.deltx); saveTransactions(); render(); }));
   }
 }
 function openTxForm(){
