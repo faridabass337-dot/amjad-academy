@@ -238,6 +238,7 @@ function saveCompleted(){ localStorage.setItem('amjad_completed_'+dateStr(),JSON
 function saveNotes(){ localStorage.setItem('amjad_notes_'+dateStr(),JSON.stringify(notes)); flashSave(); }
 function flashSave(){ const el=document.getElementById('saveFlag'); el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1200); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
+function setKnown(k,ids){ try{ localStorage.setItem('amjad_known_'+k,JSON.stringify(ids)); }catch(e){} }
 let lastSyncErr='';
 function setSyncErr(where,e){ lastSyncErr=where+': '+((e&&(e.message||e.details||e.code))||String(e)); try{localStorage.setItem('amjad_last_sync_err',lastSyncErr);}catch(x){} }
 function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?'☁️ متصل':('⚠️ غير متصل (محلي)'+(lastSyncErr?' — '+lastSyncErr.slice(0,90):'')); el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
