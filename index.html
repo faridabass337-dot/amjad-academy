@@ -238,7 +238,9 @@ function saveCompleted(){ localStorage.setItem('amjad_completed_'+dateStr(),JSON
 function saveNotes(){ localStorage.setItem('amjad_notes_'+dateStr(),JSON.stringify(notes)); flashSave(); }
 function flashSave(){ const el=document.getElementById('saveFlag'); el.classList.add('show'); setTimeout(()=>el.classList.remove('show'),1200); }
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),2200); }
-function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?'☁️ متصل':'⚠️ غير متصل (محلي)'; el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
+let lastSyncErr='';
+function setSyncErr(where,e){ lastSyncErr=where+': '+((e&&(e.message||e.details||e.code))||String(e)); try{localStorage.setItem('amjad_last_sync_err',lastSyncErr);}catch(x){} }
+function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?'☁️ متصل':('⚠️ غير متصل (محلي)'+(lastSyncErr?' — '+lastSyncErr.slice(0,90):'')); el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
 
 
 /* حذف آمن: لا يُحذف شيء من السيرفر إلا لو المستخدم حذفه صراحةً. الطلاب والمعلمون حذف ناعم (deleted_at) */
@@ -258,7 +260,7 @@ async function syncStudentsToCloud(){
     if(students.length){ const {error}=await supabaseClient.from('students').upsert(students,{onConflict:'id'}); if(error)throw error; }
     await flushDeletes('students',true);
     cloudOnline=true;
-  }catch(e){ cloudOnline=false; console.error('sync students failed, remote untouched',e); }
+  }catch(e){ cloudOnline=false; setSyncErr('sync students',e); console.error('sync students failed, remote untouched',e); }
   updateCloudStatus();
 }
 async function syncTransactionsToCloud(){
@@ -267,7 +269,7 @@ async function syncTransactionsToCloud(){
     if(transactions.length){ const {error}=await supabaseClient.from('transactions').upsert(transactions,{onConflict:'id'}); if(error)throw error; }
     await flushDeletes('transactions',false);
     cloudOnline=true;
-  }catch(e){ cloudOnline=false; console.error('sync tx failed',e); }
+  }catch(e){ cloudOnline=false; setSyncErr('sync tx',e); console.error('sync tx failed',e); }
   updateCloudStatus();
 }
 async function syncTeachersToCloud(){
@@ -276,7 +278,7 @@ async function syncTeachersToCloud(){
     if(teachers.length){ const {error}=await supabaseClient.from('teachers').upsert(teachers,{onConflict:'id'}); if(error)throw error; }
     await flushDeletes('teachers',true);
     cloudOnline=true;
-  }catch(e){ cloudOnline=false; console.error('sync teachers failed',e); }
+  }catch(e){ cloudOnline=false; setSyncErr('sync teachers',e); console.error('sync teachers failed',e); }
   updateCloudStatus();
 }
 function saveBookings(){
@@ -290,7 +292,7 @@ async function syncBookingsToCloud(){
     if(bookings.length){ const {error}=await supabaseClient.from('bookings').upsert(bookings,{onConflict:'id'}); if(error)throw error; }
     await flushDeletes('bookings',false);
     cloudOnline=true;
-  }catch(e){ cloudOnline=false; console.error('sync bookings failed',e); }
+  }catch(e){ cloudOnline=false; setSyncErr('sync bookings',e); console.error('sync bookings failed',e); }
   updateCloudStatus();
 }
 async function loadFromCloud(){
@@ -333,7 +335,7 @@ async function loadFromCloud(){
     cloudOnline=true;
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
     mirrorDirty();
-  }catch(e){ cloudOnline=false; console.error('cloud load failed',e); }
+  }catch(e){ cloudOnline=false; setSyncErr('cloud load',e); console.error('cloud load failed',e); }
   updateCloudStatus();
   render();
 }
