@@ -827,7 +827,7 @@ function renderProfile(c){
   }));
   c.querySelectorAll('[data-inv-pay]').forEach(b=>b.addEventListener('click',()=>{
     const [pid,yid]=b.dataset.invPay.split('|'); const pkg=s.packages.find(p=>p.id===pid);
-    const x=(pkg.payments||[]).find(y=>y.id===yid); if(x) generateInvoice(s,pkg,x.invoiceNumber,x.amount);
+    const x=(pkg.payments||[]).find(y=>y.id===yid); if(x) generateInvoice(s,pkg,x.invoiceNumber,x);
   }));
   c.querySelectorAll('[data-legacy-unpay]').forEach(b=>b.addEventListener('click',()=>{
     const pkg=s.packages.find(p=>p.id===b.dataset.legacyUnpay);
@@ -944,6 +944,10 @@ function generateCertificate(student, pkg){
 
 // ---------- FINANCE (partial payments, discounts, mirror to relational tables) ----------
 const PAY_METHODS=['نقدي','تحويل بنكي','فودافون كاش','إنستا باي','بطاقة','أخرى'];
+function pkgCur(p){ return (p.currency||'EGP'); }
+function pkgRate(p){ const a=Number(p.amount)||0, e=Number(p.amountEGP)||0; return (pkgCur(p)!=='EGP'&&a>0&&e>0)?e/a:1; }
+function r2(n){ return Math.round((Number(n)||0)*100)/100; }
+function getAcademyInfo(){ try{ return JSON.parse(localStorage.getItem('amjad_academy_info')||'{}'); }catch(e){ return {}; } }
 function pkgFin(p){
   const total=Number(p.amountEGP)||0;
   const disc=Math.min(Number(p.discount)||0,total);
@@ -976,7 +980,7 @@ function finBlock(p){
     </div>
     ${legacy?`<div class="pay-row">مدفوع بالكامل (مسجّل قبل نظام الدفعات) <button class="mini-btn" data-legacy-unpay="${p.id}">إلغاء الدفع</button></div>`:''}
     ${pays.map(x=>`<div class="pay-row ${x.reversed?'rev':''}">
-      <span>${escapeHtml(x.date||'')}</span><span>${escapeHtml(x.method||'')}</span><b>${fmtEGP(x.amount)}</b>
+      <span>${escapeHtml(x.date||'')}</span><span>${escapeHtml(x.method||'')}</span><b>${(x.origCurrency&&x.origCurrency!=='EGP')?escapeHtml(String(x.origAmount))+' '+escapeHtml(x.origCurrency)+' ('+fmtEGP(x.amount)+')':fmtEGP(x.amount)}</b>
       <span>${escapeHtml(x.invoiceNumber||'')}</span>${x.note?`<span>${escapeHtml(x.note)}</span>`:''}
       ${x.reversed?'<span>(ملغاة)</span>':`<button class="mini-btn" data-inv-pay="${p.id}|${x.id}">🧾 فاتورة</button><button class="mini-btn" data-rev-pay="${p.id}|${x.id}" style="color:#B8391A;border-color:#E7C9C9;">إلغاء</button>`}
     </div>`).join('')}
@@ -994,7 +998,7 @@ async function mirrorPackage(st,p){
   if(r.error) throw r.error;
   const sess=(p.sessions||[]).map((ss,i)=>({id:p.id+'_'+(i+1),subscription_id:p.id,seq:i+1,date:ss.date||null,status:ss.status||'pending',makeup:!!ss.makeup}));
   if(sess.length){ r=await supabaseClient.from('subscription_sessions').upsert(sess,{onConflict:'id'}); if(r.error) throw r.error; }
-  const pays=(Array.isArray(p.payments)?p.payments:[]).map(x=>({id:x.id,subscription_id:p.id,amount:Number(x.amount)||0,currency:'EGP',amount_egp:Number(x.amount)||0,method:x.method||null,note:x.note||null,invoice_number:x.invoiceNumber||null,paid_at:x.date||null,created_by:me,reversed_at:x.reversed?(x.reversedAt||new Date().toISOString()):null,reversed_by:x.reversed?me:null}));
+  const pays=(Array.isArray(p.payments)?p.payments:[]).map(x=>({id:x.id,subscription_id:p.id,amount:Number(x.origAmount!=null?x.origAmount:x.amount)||0,currency:x.origCurrency||'EGP',amount_egp:Number(x.amount)||0,method:x.method||null,note:x.note||null,invoice_number:x.invoiceNumber||null,paid_at:x.date||null,created_by:me,reversed_at:x.reversed?(x.reversedAt||new Date().toISOString()):null,reversed_by:x.reversed?me:null}));
   if(pays.length){ r=await supabaseClient.from('payments').upsert(pays,{onConflict:'id'}); if(r.error) throw r.error; }
 }
 async function mirrorDirty(){
@@ -1015,36 +1019,49 @@ function openPaymentForm(studentId,pkgId){
   if(f.net<=0){ toast('حدد مبلغ الباقة بالجنيه أولًا (زر "المبلغ")'); return; }
   if(f.remaining<=0){ toast('الباقة مدفوعة بالكامل'); return; }
   const payId=uid(); // ثابت لهذه النافذة: الضغط المتكرر لا يسجل دفعة ثانية
+  const cur=pkgCur(pkg), rate=pkgRate(pkg), foreign=cur!=='EGP';
+  const remOrig=r2(f.remaining/rate);
   const root=document.getElementById('modalRoot');
   root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal">
     <div class="modal-head"><div class="modal-title">تسجيل دفعة — ${escapeHtml(pkg.subject)}</div><button class="close-btn" id="closeModal">✕</button></div>
-    <div class="package-sub">المتبقي: <b>${fmtEGP(f.remaining)}</b></div>
-    <label class="field-label">المبلغ (ج.م)</label><input type="number" class="field-input" id="py_amount" value="${f.remaining}">
+    <div class="package-sub">المتبقي: <b>${foreign?remOrig+' '+cur+' ('+fmtEGP(f.remaining)+')':fmtEGP(f.remaining)}</b></div>
+    ${foreign?`<label class="field-label">المبلغ المدفوع بعملة العميل (${cur})</label><input type="number" step="any" class="field-input" id="py_orig" value="${remOrig}">
+    <label class="field-label">المعادل بالجنيه المصري (يُحسب تلقائيًا ويمكن تعديله)</label>`:`<label class="field-label">المبلغ (ج.م)</label>`}
+    <input type="number" step="any" class="field-input" id="py_amount" value="${f.remaining}">
     <label class="field-label">طريقة الدفع</label><select class="field-input" id="py_method">${PAY_METHODS.map(m=>`<option>${m}</option>`).join('')}</select>
     <label class="field-label">تاريخ الدفع</label><input type="date" class="field-input" id="py_date" value="${dateStr()}">
-    <label class="field-label">ملاحظة (اختياري)</label><input class="field-input" id="py_note">
-    <button class="submit-btn" id="submitPay">تسجيل الدفعة وإصدار الفاتورة</button></div></div>`;
+    <label class="field-label">ملاحظة تظهر على الإيصال (اختياري)</label><input class="field-input" id="py_note">
+    <button class="submit-btn" id="submitPay">تسجيل الدفعة وإصدار الإيصال</button></div></div>`;
   document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
   document.getElementById('closeModal').addEventListener('click',closeForm);
+  if(foreign){
+    document.getElementById('py_orig').addEventListener('input',()=>{
+      const o=Number(document.getElementById('py_orig').value)||0;
+      const egp=(o>=remOrig-0.001)?f.remaining:r2(o*rate);
+      document.getElementById('py_amount').value=egp;
+    });
+  }
   document.getElementById('submitPay').addEventListener('click',e=>{
     e.target.disabled=true;
-    const amount=Math.round((Number(document.getElementById('py_amount').value)||0)*100)/100;
-    const ok=addPayment(st,pkg,{payId,amount,method:document.getElementById('py_method').value,date:document.getElementById('py_date').value||dateStr(),note:document.getElementById('py_note').value.trim()});
+    const amount=r2(document.getElementById('py_amount').value);
+    const origAmount=foreign?r2(document.getElementById('py_orig').value):amount;
+    const ok=addPayment(st,pkg,{payId,amount,origAmount,origCurrency:cur,method:document.getElementById('py_method').value,date:document.getElementById('py_date').value||dateStr(),note:document.getElementById('py_note').value.trim()});
     if(ok){ closeForm(); render(); } else { e.target.disabled=false; }
   });
 }
-function addPayment(st,pkg,{payId,amount,method,date,note}){
+function addPayment(st,pkg,{payId,amount,origAmount,origCurrency,method,date,note}){
   if(!Array.isArray(pkg.payments)) pkg.payments=[];
   if(pkg.payments.some(x=>x.id===payId)||transactions.some(t=>t.id==='pay_'+payId)) return false; // منع التكرار
   const f=pkgFin(pkg);
-  if(!(amount>0)){ toast('اكتب مبلغًا صحيحًا'); return false; }
-  if(amount>f.remaining+0.001){ toast('المبلغ أكبر من المتبقي ('+f.remaining+')'); return false; }
+  if(!(amount>0)||!(origAmount>0)){ toast('اكتب مبلغًا صحيحًا'); return false; }
+  if(amount>f.remaining+0.001){ toast('المبلغ أكبر من المتبقي ('+f.remaining+' ج.م)'); return false; }
   const inv=nextInvoiceNumber(), now=new Date().toISOString();
-  pkg.payments.push({id:payId,amount,method,date,note,invoiceNumber:inv,createdAt:now,reversed:false});
+  const pay={id:payId,amount,origAmount,origCurrency:origCurrency||'EGP',method,date,note,invoiceNumber:inv,createdAt:now,reversed:false};
+  pkg.payments.push(pay);
   pkg.invoiceNumber=inv; pkg.paid=pkgFin(pkg).status==='paid';
   transactions.push({id:'pay_'+payId,type:'income',category:'اشتراك: '+st.name+' - '+pkg.subject,amount,currency:'EGP',date,note:'فاتورة رقم '+inv+' · '+method+(note?' · '+note:''),invoiceNumber:inv,createdAt:now});
   saveTransactions(); saveStudents(); markFinDirty(pkg.id); mirrorDirty();
-  generateInvoice(st,pkg,inv,amount); toast('تم تسجيل الدفعة');
+  generateInvoice(st,pkg,inv,pay); toast('تم تسجيل الدفعة');
   return true;
 }
 function reversePayment(st,pkg,payId){
@@ -1062,51 +1079,68 @@ function nextInvoiceNumber(){
   localStorage.setItem('amjad_invoice_seq',String(seq));
   return 'AMJ-'+seq;
 }
-function generateInvoice(student,pkg,invoiceNumber,payAmount){
-  const canvas=document.createElement('canvas');
-  canvas.width=1000; canvas.height=760;
+function generateInvoice(student,pkg,invoiceNumber,pay){
+  pay=pay||{amount:Number(pkg.amountEGP)||0};
+  const info=getAcademyInfo();
+  const teacher=(teachers.find(t=>t.id===pkg.teacherId)||{}).name||'';
+  const cur=(pay.origCurrency||pkgCur(pkg)), rate=pkgRate(pkg), foreign=cur!=='EGP';
+  const f=pkgFin(pkg);
+  const origPaid=pay.origAmount!=null?pay.origAmount:pay.amount;
+  const toOrig=v=>foreign?r2(v/rate):r2(v);
+  const money=(v)=>Number(v).toLocaleString('en-US',{maximumFractionDigits:2})+' '+cur;
+  const egp=(v)=>Number(v).toLocaleString('en-US',{maximumFractionDigits:2})+' EGP';
+  const W=1000,H=1080;
+  const canvas=document.createElement('canvas'); canvas.width=W; canvas.height=H;
   const ctx=canvas.getContext('2d');
-  ctx.fillStyle='#F8F4E9'; ctx.fillRect(0,0,1000,760);
-  ctx.fillStyle='#0B1B33'; ctx.fillRect(0,0,1000,140);
-  ctx.fillStyle='#E9CE86'; ctx.font='bold 30px Tahoma'; ctx.textAlign='right';
-  ctx.fillText('أكاديمية أمجاد', 940, 65);
-  ctx.fillStyle='#C9D0DE'; ctx.font='16px Tahoma';
-  ctx.fillText('فاتورة رسمية بالدفع', 940, 100);
-  ctx.textAlign='left'; ctx.fillStyle='#C9A227'; ctx.font='bold 22px Tahoma';
-  ctx.fillText(invoiceNumber, 60, 65);
-  ctx.fillStyle='#C9D0DE'; ctx.font='14px Tahoma';
-  ctx.fillText(new Date().toLocaleDateString('ar-EG'), 60, 95);
+  const R=940,L=60;
+  ctx.fillStyle='#F8F4E9'; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='#0B1B33'; ctx.fillRect(0,0,W,150);
+  ctx.fillStyle='#E9CE86'; ctx.font='bold 32px Tahoma'; ctx.textAlign='right';
+  ctx.fillText('أكاديمية أمجاد',R,62);
+  ctx.fillStyle='#C9D0DE'; ctx.font='16px Tahoma'; ctx.fillText('إيصال استلام دفعة',R,98);
+  if(info.phone||info.address){ ctx.font='13px Tahoma'; ctx.direction='ltr'; ctx.textAlign='right'; ctx.fillText([info.phone,info.address].filter(Boolean).join('  ·  '),R,128); ctx.direction='rtl'; }
+  ctx.textAlign='left'; ctx.fillStyle='#C9A227'; ctx.font='bold 24px Tahoma'; ctx.fillText(invoiceNumber,L,62);
+  ctx.fillStyle='#C9D0DE'; ctx.font='14px Tahoma'; ctx.fillText('تاريخ الدفع: '+(pay.date||dateStr()),L,95);
 
-  ctx.textAlign='right'; ctx.fillStyle='#0B1B33';
-  ctx.font='bold 20px Tahoma'; ctx.fillText('بيانات الطالب', 940, 200);
-  ctx.font='17px Tahoma'; ctx.fillStyle='#333';
-  ctx.fillText('الاسم: '+student.name, 940, 235);
-  if(student.parentName) ctx.fillText('ولي الأمر: '+student.parentName, 940, 265);
-  if(student.parentPhone) ctx.fillText('التواصل: '+student.parentPhone, 940, 295);
+  let y=205;
+  const title=t=>{ ctx.textAlign='right'; ctx.font='bold 21px Tahoma'; ctx.fillStyle='#0B1B33'; ctx.fillText(t,R,y); y+=36; };
+  ctx.direction='rtl';
+  const line=(label,val,ltr)=>{ if(val===''||val==null) return;
+    ctx.font='17px Tahoma'; ctx.fillStyle='#555'; ctx.textAlign='right'; ctx.direction='rtl'; ctx.fillText(label,R,y);
+    ctx.fillStyle='#222'; ctx.font='bold 17px Tahoma'; ctx.textAlign='right'; ctx.direction=ltr?'ltr':'rtl'; ctx.fillText(String(val),700,y);
+    ctx.direction='rtl'; y+=31; };
+  const rule=()=>{ ctx.strokeStyle='#C9A227'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(L,y-8); ctx.lineTo(R,y-8); ctx.stroke(); y+=28; };
 
-  ctx.strokeStyle='#C9A227'; ctx.lineWidth=1.5;
-  ctx.beginPath(); ctx.moveTo(60,330); ctx.lineTo(940,330); ctx.stroke();
+  title('بيانات الطالب');
+  line('الاسم',student.name); line('ولي الأمر',student.parentName); line('التواصل',student.parentPhone,true);
+  rule();
+  title('تفاصيل الاشتراك');
+  line('المادة / الباقة',pkg.subject); line('المعلم',teacher); line('عدد الحصص',pkg.sessions.length,true);
+  line('طريقة الدفع',pay.method); if(pay.note) line('ملاحظة',pay.note);
+  rule();
+  title('الحساب');
+  line('سعر الباقة', foreign?money(toOrig(f.total))+'  ('+egp(f.total)+')':egp(f.total),true);
+  if(f.disc) line('الخصم', foreign?money(toOrig(f.disc)):egp(f.disc),true); if(pkg.discountReason) line('سبب الخصم',pkg.discountReason);
+  line('إجمالي المدفوع حتى الآن', foreign?money(toOrig(f.paid))+'  ('+egp(f.paid)+')':egp(f.paid),true);
+  line('المتبقي', f.remaining>0?(foreign?money(toOrig(f.remaining))+'  ('+egp(f.remaining)+')':egp(f.remaining)):'لا يوجد', f.remaining>0);
+  rule();
 
-  ctx.font='bold 20px Tahoma'; ctx.fillStyle='#0B1B33';
-  ctx.fillText('تفاصيل الاشتراك', 940, 370);
-  ctx.font='17px Tahoma'; ctx.fillStyle='#333';
-  ctx.fillText('الباقة / المادة: '+pkg.subject, 940, 405);
-  ctx.fillText('عدد الحصص: '+pkg.sessions.length, 940, 435);
-  if(pkg.amount) ctx.fillText('المبلغ الأصلي: '+pkg.amount+' '+(pkg.currency||''), 940, 465);
+  // الدفعة الحالية بعملة العميل
+  ctx.textAlign='center'; ctx.fillStyle='#EAF4EE'; ctx.fillRect(L,y-6,R-L,130);
+  ctx.fillStyle='#1F7A4D'; ctx.font='bold 20px Tahoma'; ctx.fillText('المبلغ المدفوع في هذا الإيصال',W/2,y+26);
+  ctx.direction='ltr'; ctx.font='bold 46px Tahoma'; ctx.fillText(money(origPaid),W/2,y+78);
+  if(foreign){ ctx.font='17px Tahoma'; ctx.fillText('≈ '+egp(pay.amount),W/2,y+108); }
+  ctx.direction='rtl';
+  y+=160;
+  ctx.font='bold 20px Tahoma'; ctx.fillStyle=f.remaining>0?'#9A6A00':'#1F7A4D';
+  ctx.fillText(f.remaining>0?'دفعة جزئية — الباقي موضّح أعلاه':'✓ تم السداد بالكامل',W/2,y);
 
-  ctx.strokeStyle='#C9A227'; ctx.beginPath(); ctx.moveTo(60,500); ctx.lineTo(940,500); ctx.stroke();
-
-  ctx.font='bold 26px Tahoma'; ctx.fillStyle='#1F7A4D';
-  ctx.fillText('المبلغ المدفوع: '+Number(payAmount!=null?payAmount:(pkg.amountEGP||0)).toLocaleString('ar')+' جنيه مصري', 940, 550);
-  ctx.font='bold 18px Tahoma'; ctx.fillStyle='#1F7A4D';
-  ctx.fillText(payAmount!=null&&pkgFin(pkg).remaining>0?('المتبقي: '+Number(pkgFin(pkg).remaining).toLocaleString('ar')+' جنيه'):'✓ تم السداد بالكامل', 940, 590);
-
-  ctx.textAlign='center'; ctx.fillStyle='#8E97A8'; ctx.font='14px Tahoma';
-  ctx.fillText('أكاديمية أمجاد — هذه الفاتورة صادرة إلكترونيًا وتُعتمد كإيصال استلام رسمي', 500, 700);
-  ctx.fillText('رقم الفاتورة: '+invoiceNumber, 500, 725);
+  ctx.fillStyle='#8E97A8'; ctx.font='14px Tahoma';
+  ctx.fillText((info.footer||'أكاديمية أمجاد — هذا الإيصال صادر إلكترونيًا ويُعتمد كإيصال استلام رسمي'),W/2,H-62);
+  ctx.direction='ltr'; ctx.fillText('Receipt No. '+invoiceNumber,W/2,H-30); ctx.direction='rtl';
 
   const link=document.createElement('a');
-  link.download='فاتورة_'+invoiceNumber+'_'+student.name+'.png';
+  link.download='إيصال_'+invoiceNumber+'_'+student.name+'.png';
   link.href=canvas.toDataURL('image/png');
   link.click();
 }
@@ -1469,6 +1503,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
     ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="invoiceInfoBtn">🧾 بيانات الأكاديمية على الإيصال</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير Excel/CSV للمحاسب</div>`:''}
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;color:#B8391A;" id="lockAppBtn">🔒 قفل البرنامج الآن</div>
@@ -1476,6 +1511,14 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   if(isAdmin()){
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
   document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
+  document.getElementById('invoiceInfoBtn').addEventListener('click',()=>{
+    const cur=getAcademyInfo();
+    const phone=prompt('رقم هاتف / واتساب الأكاديمية (يظهر أعلى الإيصال)',cur.phone||''); if(phone===null) return;
+    const address=prompt('العنوان أو الموقع / رابط (اختياري)',cur.address||''); if(address===null) return;
+    const footer=prompt('نص أسفل الإيصال (اتركه فارغًا للنص الافتراضي)',cur.footer||''); if(footer===null) return;
+    localStorage.setItem('amjad_academy_info',JSON.stringify({phone:phone.trim(),address:address.trim(),footer:footer.trim()}));
+    document.getElementById('settingsMenuRoot').innerHTML=''; toast('تم حفظ بيانات الإيصال');
+  });
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
   }
