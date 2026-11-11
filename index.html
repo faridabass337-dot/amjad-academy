@@ -1507,10 +1507,67 @@ async function renderSupervisors(c){
   }));
 }
 
+
+// ---------- DASHBOARD helpers ----------
+let statsPeriod='month';
+const PERIODS=[['today','اليوم'],['week','آخر 7 أيام'],['month','هذا الشهر'],['year','هذه السنة'],['all','الكل']];
+function periodTest(period){
+  const now=new Date(); const iso=d=>d.toISOString().slice(0,10); const today=iso(now);
+  if(period==='today') return d=>d===today;
+  if(period==='week'){ const from=iso(new Date(now.getTime()-6*86400000)); return d=>d>=from&&d<=today; }
+  if(period==='month'){ const m=today.slice(0,7); return d=>d.startsWith(m); }
+  if(period==='year'){ const y=today.slice(0,4); return d=>d.startsWith(y); }
+  return ()=>true;
+}
+function statsAlertsHtml(){
+  const owing=[], expiring=[], noPrice=[]; let pendTotal=0, pendCount=0, owedTotal=0;
+  students.forEach(st=>(st.packages||[]).forEach(pk=>{
+    const f=pkgFin(pk);
+    (pk.payments||[]).forEach(x=>{ if(!x.reversed&&x.status==='pending'){ pendTotal+=Number(x.amount)||0; pendCount++; } });
+    if(pk.active!==false){
+      if(f.net>0&&f.remaining>0){ owing.push({st,pk,f}); owedTotal+=f.remaining; }
+      if(f.net<=0&&!pk.paid) noPrice.push({st,pk});
+      const left=(pk.sessions||[]).filter(ss=>!ss.status||ss.status==='pending').length;
+      if(left>0&&left<=2) expiring.push({st,pk,left});
+    }
+  }));
+  owing.sort((a,b)=>b.f.remaining-a.f.remaining);
+  const box=(bg,bd,title,body)=>`<div class="stats-section" style="background:${bg};border:1px solid ${bd};border-radius:14px;padding:14px;margin-bottom:12px;"><div style="font-weight:800;font-size:14px;margin-bottom:6px;">${title}</div>${body}</div>`;
+  const row=(a,b,c2)=>`<div class="compare-row"><span>${a}</span><span style="font-weight:700;">${b}</span>${c2||''}</div>`;
+  let out='';
+  if(pendCount) out+=box('#FFF8E6','#E9CE86','⏳ مالية مؤجلة بانتظار التأكيد',`<div style="font-size:13px;">${pendCount} مبلغ · <b>${fmtEGP(pendTotal)}</b> — أكّدها من تبويب المالية.</div>`);
+  if(owing.length) out+=box('#FDF0EE','#E7C9C9','⚠️ متأخرات الدفع',`<div style="font-size:12px;color:var(--muted);margin-bottom:6px;">إجمالي المتبقي على الباقات النشطة: <b style="color:#B8391A;">${fmtEGP(owedTotal)}</b></div>`+owing.slice(0,8).map(o=>row(escapeHtml(o.st.name)+' — '+escapeHtml(o.pk.subject),fmtEGP(o.f.remaining))).join('')+(owing.length>8?`<div style="font-size:11px;color:var(--muted);">و${owing.length-8} باقات أخرى…</div>`:''));
+  if(expiring.length) out+=box('#FFFBEA','#E9CE86','⏰ اشتراكات على وشك الانتهاء',expiring.slice(0,8).map(o=>row(escapeHtml(o.st.name)+' — '+escapeHtml(o.pk.subject),'باقي '+o.left+' حصة')).join('')+(expiring.length>8?`<div style="font-size:11px;color:var(--muted);">و${expiring.length-8} أخرى…</div>`:''));
+  if(noPrice.length) out+=box('#F3F3F3','#DDD','ℹ️ باقات بدون سعر محدد',`<div style="font-size:12px;">${noPrice.length} باقة نشطة سعرها 0 — حدّدها من ✏️ السعر والعملة: ${noPrice.slice(0,6).map(o=>escapeHtml(o.st.name)).join('، ')}${noPrice.length>6?'…':''}</div>`);
+  return out;
+}
+function periodChipsHtml(){
+  return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">${PERIODS.map(([k,l])=>`<button class="mini-btn ${statsPeriod===k?'filled':''}" data-stats-period="${k}">${l}</button>`).join('')}</div>`;
+}
+function monthlyChartHtml(){
+  const now=new Date(); const months=[];
+  for(let i=5;i>=0;i--){ const d=new Date(now.getFullYear(),now.getMonth()-i,1); months.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')); }
+  const sum=(m,types)=>transactions.filter(t=>t.date&&t.date.startsWith(m)&&types.includes(t.type)&&(t.currency||'EGP')==='EGP').reduce((a,t)=>a+Number(t.amount||0),0);
+  const data=months.map(m=>({m,inc:sum(m,['income']),exp:sum(m,['expense','ad'])}));
+  const max=Math.max(1,...data.map(d=>Math.max(d.inc,d.exp)));
+  const H=110;
+  return `<div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:16px;margin-bottom:14px;">
+    <div style="font-weight:800;font-size:14px;margin-bottom:10px;">📊 الإيرادات والمصروفات — آخر 6 شهور (جنيه)</div>
+    <div style="display:flex;align-items:flex-end;gap:8px;height:${H+20}px;">
+      ${data.map(d=>`<div style="flex:1;text-align:center;"><div style="display:flex;align-items:flex-end;justify-content:center;gap:3px;height:${H}px;">
+        <div title="إيراد ${d.inc}" style="width:42%;height:${Math.round(d.inc/max*H)}px;background:#1F7A4D;border-radius:4px 4px 0 0;min-height:${d.inc?2:0}px;"></div>
+        <div title="مصروف ${d.exp}" style="width:42%;height:${Math.round(d.exp/max*H)}px;background:#B8391A;border-radius:4px 4px 0 0;min-height:${d.exp?2:0}px;"></div></div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px;">${d.m.slice(5)}</div></div>`).join('')}
+    </div>
+    <div style="display:flex;gap:14px;justify-content:center;font-size:11px;margin-top:6px;"><span><span style="color:#1F7A4D;">■</span> إيرادات</span><span><span style="color:#B8391A;">■</span> مصروفات</span></div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;">الإيراد هنا = المبالغ المؤكدة فقط (المؤجلة لا تُحسب).</div>
+  </div>`;
+}
+
 function renderStats(c){
   const total=students.length, active=students.filter(s=>s.status==='active').length, nw=students.filter(s=>s.status==='new').length, paused=students.filter(s=>s.status==='paused').length;
-  const byCur={};
-  transactions.forEach(t=>{ const cur=t.currency||'EGP'; if(!byCur[cur])byCur[cur]={income:0,expense:0,ad:0}; byCur[cur][t.type]+=Number(t.amount||0); });
+  const byCur={}; const inP=periodTest(statsPeriod);
+  transactions.filter(t=>t.date&&inP(t.date)).forEach(t=>{ const cur=t.currency||'EGP'; if(!byCur[cur])byCur[cur]={income:0,expense:0,ad:0}; byCur[cur][t.type]+=Number(t.amount||0); });
   const finRows=Object.keys(byCur).map(cur=>{ const d=byCur[cur]; const net=d.income-d.expense-d.ad;
     return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #F0EAD6;font-size:13px;"><span>${cur}</span><span style="color:${net>=0?'#1F7A4D':'#B8391A'};font-weight:700;">صافي: ${net.toLocaleString('ar')}</span></div>`;
   }).join('') || '<div style="font-size:12px;color:var(--muted);">لا يوجد بيانات</div>';
@@ -1530,6 +1587,7 @@ function renderStats(c){
 
   c.innerHTML=`
     ${showSalaryBanner?`<div class="salary-banner">💰 قرب معاد رواتب الشهر — لسه محدّش سجل مرتب: ${teachersUnpaidThisMonth.map(t=>escapeHtml(t.name)).join('، ')}</div>`:''}
+    ${statsAlertsHtml()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;">
       <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;">${total}</div><div style="font-size:11px;color:var(--muted);">إجمالي الطلاب</div></div>
       <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:12px;padding:14px;text-align:center;"><div style="font-size:22px;font-weight:800;color:var(--gold);">${active}</div><div style="font-size:11px;color:var(--muted);">نشط</div></div>
@@ -1538,6 +1596,7 @@ function renderStats(c){
     </div>
     <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:16px;margin-bottom:14px;">
       <div style="font-weight:800;font-size:14px;margin-bottom:8px;">📊 الملخص المالي</div>
+      ${periodChipsHtml()}
       ${finRows}
     </div>
     <div class="stats-section" style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:16px;margin-bottom:14px;">
@@ -1546,8 +1605,10 @@ function renderStats(c){
       <div class="compare-row"><span>الشهر اللي فات</span><span style="font-weight:800;">${lastIncome.toLocaleString('ar')}</span></div>
       <div class="compare-row" style="border-bottom:none;"><span>الفرق</span><span class="${diff>=0?'compare-up':'compare-down'}">${diff>=0?'▲':'▼'} ${Math.abs(diffPct)}%</span></div>
     </div>
+    ${monthlyChartHtml()}
     <button class="add-row-btn" id="monthlyReportBtn">⬇️ تحميل تقرير الشهر (صورة)</button>
   `;
+  c.querySelectorAll('[data-stats-period]').forEach(b=>b.addEventListener('click',()=>{ statsPeriod=b.dataset.statsPeriod; render(); }));
   document.getElementById('monthlyReportBtn').addEventListener('click',()=>generateMonthlyReport(thisMonth,thisIncome,lastIncome,byCur));
 }
 
