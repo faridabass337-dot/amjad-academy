@@ -1646,7 +1646,9 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="invoiceInfoBtn">🧾 بيانات الأكاديمية على الإيصال</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
-    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير Excel/CSV للمحاسب</div>`:''}
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportXlsxBtn">📗 تقرير مالي Excel (.xlsx)</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportFinPdfBtn">📄 تقرير مالي PDF (طباعة)</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير CSV للمحاسب</div>`:''}
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;color:#B8391A;" id="lockAppBtn">🔒 قفل البرنامج الآن</div>
   </div>`;
   if(isAdmin()){
@@ -1662,6 +1664,8 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   });
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
+  document.getElementById('exportXlsxBtn').addEventListener('click',exportFinanceXlsx);
+  document.getElementById('exportFinPdfBtn').addEventListener('click',exportFinancePdf);
   }
   document.getElementById('lockAppBtn').addEventListener('click',()=>{
     if(supabaseClient) supabaseClient.auth.signOut().finally(()=>location.reload());
@@ -1679,6 +1683,108 @@ function downloadCsv(filename, rows){
   const a=document.createElement('a'); a.href=url; a.download=filename; a.click();
   URL.revokeObjectURL(url);
 }
+
+// ---------- XLSX export (no external library) ----------
+const _crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function _crc32(u8){let c=0xFFFFFFFF;for(let i=0;i<u8.length;i++)c=_crcT[(c^u8[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipStore(files){ // files: [{name,data:Uint8Array}]
+  const enc=new TextEncoder(); const chunks=[]; const central=[]; let offset=0;
+  const w16=(a,v)=>a.push(v&255,(v>>8)&255), w32=(a,v)=>a.push(v&255,(v>>8)&255,(v>>16)&255,(v>>>24)&255);
+  files.forEach(f=>{
+    const name=enc.encode(f.name), crc=_crc32(f.data), size=f.data.length;
+    const h=[]; w32(h,0x04034b50); w16(h,20); w16(h,0x0800); w16(h,0); w16(h,0); w16(h,0x21); w32(h,crc); w32(h,size); w32(h,size); w16(h,name.length); w16(h,0);
+    chunks.push(new Uint8Array(h),name,f.data);
+    const c=[]; w32(c,0x02014b50); w16(c,20); w16(c,20); w16(c,0x0800); w16(c,0); w16(c,0); w16(c,0x21); w32(c,crc); w32(c,size); w32(c,size); w16(c,name.length); w16(c,0); w16(c,0); w16(c,0); w16(c,0); w32(c,0); w32(c,offset);
+    central.push(new Uint8Array(c),name);
+    offset+=h.length+name.length+size;
+  });
+  let csize=0; central.forEach(x=>csize+=x.length);
+  const e=[]; w32(e,0x06054b50); w16(e,0); w16(e,0); w16(e,files.length); w16(e,files.length); w32(e,csize); w32(e,offset); w16(e,0);
+  return new Blob([...chunks,...central,new Uint8Array(e)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function _xe(v){ return String(v).replace(/[<>&"']/g,m=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[m])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,''); }
+function _col(i){ let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s; }
+function buildXlsx(sheets){
+  const enc=new TextEncoder(); const u=t=>enc.encode(t);
+  const files=[];
+  files.push({name:'[Content_Types].xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((_,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join('')+'</Types>')});
+  files.push({name:'_rels/.rels',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')});
+  files.push({name:'xl/workbook.xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((sh,i)=>'<sheet name="'+_xe(sh.name.replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,31))+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+'</sheets></workbook>')});
+  files.push({name:'xl/_rels/workbook.xml.rels',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((_,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+'<Relationship Id="rId'+(sheets.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')});
+  files.push({name:'xl/styles.xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0EADA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs></styleSheet>')});
+  sheets.forEach((sh,i)=>{
+    const ncols=Math.max(1,...sh.rows.map(r=>r.length));
+    let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews><cols>';
+    for(let c=0;c<ncols;c++) x+='<col min="'+(c+1)+'" max="'+(c+1)+'" width="'+(sh.widths&&sh.widths[c]||20)+'" customWidth="1"/>';
+    x+='</cols><sheetData>';
+    sh.rows.forEach((row,r)=>{
+      x+='<row r="'+(r+1)+'">';
+      row.forEach((v,c)=>{
+        if(v===null||v===undefined||v==='') return;
+        const ref=_col(c)+(r+1), st=(r===0&&!sh.noHeader)?' s="1"':'';
+        if(typeof v==='number'&&isFinite(v)) x+='<c r="'+ref+'"'+st+'><v>'+v+'</v></c>';
+        else x+='<c r="'+ref+'" t="inlineStr"'+st+'><is><t xml:space="preserve">'+_xe(v)+'</t></is></c>';
+      });
+      x+='</row>';
+    });
+    x+='</sheetData></worksheet>';
+    files.push({name:'xl/worksheets/sheet'+(i+1)+'.xml',data:u(x)});
+  });
+  return zipStore(files);
+}
+function downloadBlob(blob,filename){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1500); }
+function financeReportData(){
+  const payRows=[['الطالب','المادة','التاريخ','طريقة الدفع','المبلغ (عملة العميل)','العملة','المعادل (ج.م)','الحالة','رقم الإيصال','ملاحظة']];
+  const owingRows=[['الطالب','المادة','السعر (ج.م)','الخصم (ج.م)','مؤكد (ج.م)','مؤجل (ج.م)','المتبقي (ج.م)','الحالة']];
+  let owedTotal=0,pendTotal=0;
+  students.forEach(st=>(st.packages||[]).forEach(pk=>{
+    const f=pkgFin(pk);
+    if(Array.isArray(pk.payments)) pk.payments.forEach(x=>{
+      const stt=x.reversed?(x.status==='cancelled'?'ملغاة (كانت مؤجلة)':'ملغاة'):x.status==='pending'?'مؤجلة':'مؤكدة';
+      payRows.push([st.name,pk.subject,x.date||'',x.method||'',Number(x.origAmount!=null?x.origAmount:x.amount)||0,x.origCurrency||'EGP',Number(x.amount)||0,stt,x.invoiceNumber||'',x.note||'']);
+    });
+    else if(pk.paid) payRows.push([st.name,pk.subject,'','(قبل نظام الدفعات)',Number(pk.amount)||0,pk.currency||'EGP',Number(pk.amountEGP)||0,'مؤكدة (قديمة)','','']);
+    if(pk.active!==false){
+      owedTotal+=f.remaining; pendTotal+=f.pending;
+      if(f.remaining>0||f.pending>0||f.net<=0) owingRows.push([st.name,pk.subject,f.total,f.disc,f.paid,f.pending,f.remaining,f.net<=0?'بدون سعر':f.status==='paid'?'مدفوع':f.status==='partial'?'جزئي':'غير مدفوع']);
+    }
+  }));
+  const txRows=[['رقم الفاتورة','التاريخ','النوع','البند','المبلغ','العملة','ملاحظة']];
+  [...transactions].sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(t=>txRows.push([t.invoiceNumber||'',t.date||'',t.type==='income'?'إيراد':t.type==='expense'?'مصروف':'إعلان',t.category||'',Number(t.amount)||0,t.currency||'EGP',t.note||'']));
+  const byCur={}; transactions.forEach(t=>{ const c=t.currency||'EGP'; if(!byCur[c])byCur[c]={income:0,expense:0,ad:0}; byCur[c][t.type]=(byCur[c][t.type]||0)+(Number(t.amount)||0); });
+  const sumRows=[['العملة','الإيرادات','المصروفات','الإعلانات','الصافي']];
+  Object.keys(byCur).forEach(c=>{ const d=byCur[c]; sumRows.push([c,d.income,d.expense,d.ad,d.income-d.expense-d.ad]); });
+  sumRows.push([],['إجمالي المتأخرات (ج.م)',owedTotal],['إجمالي المالية المؤجلة (ج.م)',pendTotal],['تاريخ التقرير',dateStr()]);
+  return {payRows,owingRows,txRows,sumRows,owedTotal,pendTotal,byCur};
+}
+function exportFinanceXlsx(){
+  if(!isAdmin()) return;
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const d=financeReportData();
+  const blob=buildXlsx([
+    {name:'الملخص',rows:d.sumRows,widths:[30,16,16,16,16]},
+    {name:'المتأخرات',rows:d.owingRows,widths:[22,18,14,14,14,14,14,14]},
+    {name:'الدفعات',rows:d.payRows,widths:[22,18,13,16,18,10,14,18,14,24]},
+    {name:'المعاملات',rows:d.txRows,widths:[14,13,10,34,14,10,30]}
+  ]);
+  downloadBlob(blob,'amjad-finance-'+dateStr()+'.xlsx'); toast('تم تصدير التقرير المالي Excel');
+}
+function exportFinancePdf(){
+  if(!isAdmin()) return;
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const d=financeReportData();
+  const th='border:1px solid #ccc;padding:5px;background:#f0eada;', td='border:1px solid #ccc;padding:5px;';
+  const tbl=(rows)=>'<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:18px;">'+rows.map((r,i)=>'<tr>'+r.map(v=>'<'+(i?'td':'th')+' style="'+(i?td:th)+'">'+escapeHtml(String(v==null?'':v))+'</'+(i?'td':'th')+'>').join('')+'</tr>').join('')+'</table>';
+  const h2=t=>'<h2 style="font-size:16px;border-bottom:2px solid #C9A227;padding-bottom:4px;margin:14px 0 10px;">'+t+'</h2>';
+  document.getElementById('fullBackupPrint').innerHTML=
+    '<div style="text-align:center;margin-bottom:18px;"><h1 style="font-size:22px;margin-bottom:4px;">أكاديمية أمجاد — التقرير المالي</h1><div style="font-size:12px;color:#555;">'+dateStr()+'</div></div>'
+    +h2('الملخص')+tbl(d.sumRows.filter(r=>r.length))
+    +h2('المتأخرات والمبالغ المؤجلة')+tbl(d.owingRows)
+    +h2('الدفعات')+tbl(d.payRows)
+    +h2('المعاملات')+tbl(d.txRows);
+  document.body.classList.add('printing-backup'); window.print();
+}
+
 function exportCsv(){
   document.getElementById('settingsMenuRoot').innerHTML='';
   const txRows=[['رقم الفاتورة','التاريخ','النوع','البند','المبلغ','العملة','ملاحظة']];
