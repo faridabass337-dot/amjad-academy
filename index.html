@@ -104,6 +104,10 @@ body{font-family:Tahoma, Arial, sans-serif; background:var(--paper); color:var(-
 .pay-paid{background:#E3F2E9; color:#1F7A4D;} .pay-unpaid{background:#F3E4E4; color:#B8391A;}
 .progress-bar{height:8px; background:var(--paper2); border-radius:6px; overflow:hidden; margin:10px 0;}
 .progress-fill{height:100%; background:linear-gradient(90deg,var(--gold-light),var(--gold));}
+.fin-box{background:var(--card,#fff);border:1px dashed var(--gold);border-radius:10px;padding:10px;margin:8px 0;font-size:12.5px;}
+.fin-sum{display:flex;flex-wrap:wrap;gap:4px 14px;margin-bottom:6px;} .fin-rem{color:#B8391A;font-weight:700;} .fin-ok{color:#1F7A4D;font-weight:700;}
+.pay-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:5px 0;border-top:1px solid #E0DAC8;font-size:12px;} .pay-row.rev{opacity:.5;text-decoration:line-through;}
+.pay-badge.pay-part{background:#FFF1D6;color:#9A6A00;}
 .session-list{display:flex; flex-wrap:wrap; gap:6px; margin:10px 0;}
 .session-chip{width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; cursor:pointer; border:1.5px solid #E0DAC8; background:#fff;}
 .session-chip.attended{background:#1F7A4D; color:#fff; border-color:#1F7A4D;}
@@ -328,6 +332,7 @@ async function loadFromCloud(){
     if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings)); setKnown('bookings',bookings.map(b=>b.id));} }
     cloudOnline=true;
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
+    mirrorDirty();
   }catch(e){ cloudOnline=false; console.error('cloud load failed',e); }
   updateCloudStatus();
   render();
@@ -740,17 +745,20 @@ function renderProfile(c){
           <div class="package-title">${escapeHtml(p.subject)} ${p.active?'':'<span style="font-size:11px;color:var(--muted);">(منتهية)</span>'}</div>
           <div class="package-sub">${teacher?'👨‍🏫 '+escapeHtml(teacher.name):'بدون معلم'} ${p.whatsappGroup?' · <a href="'+escapeHtml(p.whatsappGroup)+'" target="_blank">جروب الواتساب</a>':''}</div>
         </div>
-        ${isAdmin()?`<span class="pay-badge ${p.paid?'pay-paid':'pay-unpaid'}">${p.paid?'✓ مدفوع':'غير مدفوع'}</span>`:''}
+        ${isAdmin()?finBadge(p):''}
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;"></div></div>
       <div class="package-sub">${doneCount}/${p.sessions.length} حصة${isAdmin()?' · '+escapeHtml(p.amount||'')+' '+escapeHtml(p.currency||'')+(p.amountEGP?' ('+escapeHtml(p.amountEGP)+' ج.م)':''):''}</div>
+      ${isAdmin()?finBlock(p):''}
       <div class="session-list">
         ${p.sessions.map((ss,i)=>`<div class="session-chip ${ss.status==='attended'?'attended':ss.status==='absent'?'absent':''}" data-pkg="${p.id}" data-sess="${i}" title="${ss.date}">${i+1}</div>`).join('')}
       </div>
       ${(isAdmin()&&p.receipt)?`<img class="receipt-thumb" src="${p.receipt}" data-view-receipt="${p.id}">`:''}
       ${(p.active && !complete && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)<=2 && (p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length)>0)?`<div class="renew-warning">⏰ باقي ${p.sessions.length-doneCount-p.sessions.filter(ss=>ss.status==='absent').length} حصة بس على انتهاء الباقة</div>`:''}
       <div class="package-footer">
-        ${isAdmin()?`<button class="mini-btn ${p.paid?'':'filled'}" data-toggle-paid="${p.id}">${p.paid?'إلغاء الدفع':'تسجيل كمدفوع'}</button>
+        ${isAdmin()?`<button class="mini-btn filled" data-add-pay="${p.id}">💳 تسجيل دفعة</button>
+        <button class="mini-btn" data-discount="${p.id}">🏷️ خصم</button>
+        <button class="mini-btn" data-set-amount="${p.id}">✏️ المبلغ</button>
         <button class="mini-btn" data-upload-receipt="${p.id}">📎 إيصال</button>`:''}
         <button class="mini-btn" data-remind="${p.id}">📲 تذكير تجديد</button>
         <button class="mini-btn" data-makeup="${p.id}">➕ حصة تعويضية</button>
@@ -772,7 +780,7 @@ function renderProfile(c){
     const sess=pkg.sessions[Number(chip.dataset.sess)];
     sess.status = sess.status==='attended'?'absent': sess.status==='absent'?'pending':'attended';
     sess.date = sess.status==='pending' ? '' : dateStr();
-    saveStudents(); render();
+    saveStudents(); if(isAdmin()){ markFinDirty(pkg.id); mirrorDirty(); } render();
   }));
   c.querySelectorAll('[data-remind]').forEach(b=>b.addEventListener('click',()=>{
     const pkg=s.packages.find(p=>p.id===b.dataset.remind);
@@ -785,19 +793,42 @@ function renderProfile(c){
     const pkg=s.packages.find(p=>p.id===b.dataset.makeup);
     pkg.sessions.push({date:'',status:'pending',makeup:true});
     pkg.totalSessions=pkg.sessions.length;
-    saveStudents(); render(); toast('اتضافت حصة تعويضية للباقة');
+    saveStudents(); if(isAdmin()){ markFinDirty(pkg.id); mirrorDirty(); } render(); toast('اتضافت حصة تعويضية للباقة');
   }));
-  c.querySelectorAll('[data-toggle-paid]').forEach(b=>b.addEventListener('click',()=>{
-    const pkg=s.packages.find(p=>p.id===b.dataset.togglePaid);
-    pkg.paid=!pkg.paid;
-    if(pkg.paid && pkg.amountEGP){
-      const invoiceNumber=nextInvoiceNumber();
-      pkg.invoiceNumber=invoiceNumber;
-      transactions.push({id:uid(),type:'income',category:'اشتراك: '+s.name+' - '+pkg.subject,amount:Number(pkg.amountEGP),currency:'EGP',date:dateStr(),note:'فاتورة رقم '+invoiceNumber,invoiceNumber,createdAt:new Date().toISOString()});
-      saveTransactions();
-      generateInvoice(s,pkg,invoiceNumber);
-    }
-    saveStudents(); render(); toast(pkg.paid?'تم تسجيل الدفع وإصدار الفاتورة':'تم إلغاء الدفع');
+  c.querySelectorAll('[data-add-pay]').forEach(b=>b.addEventListener('click',()=>openPaymentForm(s.id,b.dataset.addPay)));
+  c.querySelectorAll('[data-discount]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.discount);
+    const f=pkgFin(pkg);
+    const v=prompt('قيمة الخصم بالجنيه (الحد الأقصى '+f.total+')',pkg.discount||'0'); if(v===null) return;
+    const d=Math.round((Number(v)||0)*100)/100;
+    if(d<0||d>f.total){ toast('قيمة الخصم غير صحيحة'); return; }
+    const newNet=f.total-d;
+    if(f.paid>newNet+0.001){ toast('الخصم أكبر من اللازم: المدفوع '+f.paid+' أكبر من الصافي الجديد'); return; }
+    const reason=d>0?(prompt('سبب الخصم (اختياري)',pkg.discountReason||'')||''):'';
+    pkg.discount=d; pkg.discountReason=reason;
+    pkg.paid=pkgFin(pkg).status==='paid';
+    saveStudents(); markFinDirty(pkg.id); mirrorDirty(); render(); toast('تم تحديث الخصم');
+  }));
+  c.querySelectorAll('[data-set-amount]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.setAmount);
+    const v=prompt('إجمالي سعر الباقة بالجنيه المصري',pkg.amountEGP||''); if(v===null) return;
+    const n=Number(v); if(!(n>=0)){ toast('رقم غير صحيح'); return; }
+    if(pkgFin(Object.assign({},pkg,{amountEGP:n})).paid>Math.max(n-(Number(pkg.discount)||0),0)+0.001){ toast('المدفوع أكبر من السعر الجديد'); return; }
+    pkg.amountEGP=String(n); if(!pkg.currency||pkg.currency==='EGP') pkg.amount=String(n);
+    pkg.paid=pkgFin(pkg).status==='paid';
+    saveStudents(); markFinDirty(pkg.id); mirrorDirty(); render();
+  }));
+  c.querySelectorAll('[data-rev-pay]').forEach(b=>b.addEventListener('click',()=>{
+    const [pid,yid]=b.dataset.revPay.split('|'); const pkg=s.packages.find(p=>p.id===pid);
+    if(confirm('إلغاء هذه الدفعة؟ ستبقى في السجل كملغاة ويُخصم إيرادها.')){ reversePayment(s,pkg,yid); render(); toast('تم إلغاء الدفعة'); }
+  }));
+  c.querySelectorAll('[data-inv-pay]').forEach(b=>b.addEventListener('click',()=>{
+    const [pid,yid]=b.dataset.invPay.split('|'); const pkg=s.packages.find(p=>p.id===pid);
+    const x=(pkg.payments||[]).find(y=>y.id===yid); if(x) generateInvoice(s,pkg,x.invoiceNumber,x.amount);
+  }));
+  c.querySelectorAll('[data-legacy-unpay]').forEach(b=>b.addEventListener('click',()=>{
+    const pkg=s.packages.find(p=>p.id===b.dataset.legacyUnpay);
+    if(confirm('إلغاء حالة الدفع القديمة لهذه الباقة؟')){ pkg.paid=false; saveStudents(); markFinDirty(pkg.id); mirrorDirty(); render(); }
   }));
   c.querySelectorAll('[data-upload-receipt]').forEach(b=>b.addEventListener('click',()=>{
     const inp=document.getElementById('photoInput');
@@ -821,7 +852,7 @@ function renderProfile(c){
     openPackageForm(s.id,null,{subject:pkg.subject,teacherId:pkg.teacherId,whatsappGroup:pkg.whatsappGroup});
   }));
   c.querySelectorAll('[data-del-pkg]').forEach(b=>b.addEventListener('click',()=>{
-    if(confirm('حذف الباقة دي نهائيًا؟')){ s.packages=s.packages.filter(p=>p.id!==b.dataset.delPkg); saveStudents(); render(); }
+    if(confirm('حذف الباقة دي نهائيًا؟')){ const did=b.dataset.delPkg; s.packages=s.packages.filter(p=>p.id!==did); saveStudents(); if(isAdmin()&&supabaseClient) supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).eq('id',did).then(r=>{ if(r.error) console.error(r.error); }); render(); }
   }));
 }
 
@@ -875,7 +906,7 @@ function openPackageForm(studentId, pkgId, prefill){
     const sessions=Array.from({length:totalSessions},(_,i)=>({date:'',status:'pending'}));
     const pkg={id:uid(),subject,teacherId,whatsappGroup,totalSessions,sessions,amount,currency,amountEGP,paid:false,receipt:'',active:true,createdAt:dateStr()};
     s.packages.push(pkg);
-    saveStudents(); closeForm(); render(); toast('تم إضافة الباقة');
+    saveStudents(); markFinDirty(pkg.id); mirrorDirty(); closeForm(); render(); toast('تم إضافة الباقة');
   });
 }
 
@@ -907,6 +938,120 @@ function generateCertificate(student, pkg){
   toast('تم تحميل الشهادة');
 }
 
+
+// ---------- FINANCE (partial payments, discounts, mirror to relational tables) ----------
+const PAY_METHODS=['نقدي','تحويل بنكي','فودافون كاش','إنستا باي','بطاقة','أخرى'];
+function pkgFin(p){
+  const total=Number(p.amountEGP)||0;
+  const disc=Math.min(Number(p.discount)||0,total);
+  const net=Math.max(total-disc,0);
+  let paid;
+  if(Array.isArray(p.payments)) paid=p.payments.filter(x=>!x.reversed).reduce((a,x)=>a+(Number(x.amount)||0),0);
+  else paid=p.paid?net:0;
+  const remaining=Math.max(Math.round((net-paid)*100)/100,0);
+  let status='unpaid';
+  if(net>0){ status=remaining<=0?'paid':(paid>0?'partial':'unpaid'); } else if(p.paid){ status='paid'; }
+  return {total,disc,net,paid,remaining,status};
+}
+function finBadge(p){
+  const f=pkgFin(p);
+  return f.status==='paid'?'<span class="pay-badge pay-paid">✓ مدفوع بالكامل</span>'
+        :f.status==='partial'?'<span class="pay-badge pay-part">◐ دفعة جزئية</span>'
+        :'<span class="pay-badge pay-unpaid">غير مدفوع</span>';
+}
+function fmtEGP(n){ return Number(n||0).toLocaleString('ar')+' ج.م'; }
+function finBlock(p){
+  const f=pkgFin(p);
+  const pays=Array.isArray(p.payments)?p.payments:[];
+  const legacy=!Array.isArray(p.payments)&&p.paid;
+  return `<div class="fin-box">
+    <div class="fin-sum">
+      <span>الإجمالي: <b>${fmtEGP(f.total)}</b></span>
+      ${f.disc?`<span>خصم: <b>${fmtEGP(f.disc)}</b>${p.discountReason?' ('+escapeHtml(p.discountReason)+')':''}</span>`:''}
+      <span>مدفوع: <b>${fmtEGP(f.paid)}</b></span>
+      <span class="${f.remaining>0?'fin-rem':'fin-ok'}">المتبقي: ${fmtEGP(f.remaining)}</span>
+    </div>
+    ${legacy?`<div class="pay-row">مدفوع بالكامل (مسجّل قبل نظام الدفعات) <button class="mini-btn" data-legacy-unpay="${p.id}">إلغاء الدفع</button></div>`:''}
+    ${pays.map(x=>`<div class="pay-row ${x.reversed?'rev':''}">
+      <span>${escapeHtml(x.date||'')}</span><span>${escapeHtml(x.method||'')}</span><b>${fmtEGP(x.amount)}</b>
+      <span>${escapeHtml(x.invoiceNumber||'')}</span>${x.note?`<span>${escapeHtml(x.note)}</span>`:''}
+      ${x.reversed?'<span>(ملغاة)</span>':`<button class="mini-btn" data-inv-pay="${p.id}|${x.id}">🧾 فاتورة</button><button class="mini-btn" data-rev-pay="${p.id}|${x.id}" style="color:#B8391A;border-color:#E7C9C9;">إلغاء</button>`}
+    </div>`).join('')}
+  </div>`;
+}
+function markFinDirty(pid){ try{ const a=JSON.parse(localStorage.getItem('amjad_fin_dirty')||'[]'); if(!a.includes(pid)) a.push(pid); localStorage.setItem('amjad_fin_dirty',JSON.stringify(a)); }catch(e){} }
+async function mirrorPackage(st,p){
+  const f=pkgFin(p);
+  const me=currentUser&&currentUser.id||null;
+  let teacher=p.teacherId||null;
+  let r=await supabaseClient.from('subscriptions').upsert({id:p.id,student_id:st.id,subject:p.subject,teacher_id:teacher,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},{onConflict:'id'});
+  if(r.error&&teacher){ r=await supabaseClient.from('subscriptions').upsert({id:p.id,student_id:st.id,subject:p.subject,teacher_id:null,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},{onConflict:'id'}); }
+  if(r.error) throw r.error;
+  r=await supabaseClient.from('subscription_finance').upsert({subscription_id:p.id,total_amount:Number(p.amount)||0,currency:p.currency||'EGP',total_amount_egp:f.total,discount_amount:f.disc,discount_reason:p.discountReason||null,paid_total_egp:f.paid},{onConflict:'subscription_id'});
+  if(r.error) throw r.error;
+  const sess=(p.sessions||[]).map((ss,i)=>({id:p.id+'_'+(i+1),subscription_id:p.id,seq:i+1,date:ss.date||null,status:ss.status||'pending',makeup:!!ss.makeup}));
+  if(sess.length){ r=await supabaseClient.from('subscription_sessions').upsert(sess,{onConflict:'id'}); if(r.error) throw r.error; }
+  const pays=(Array.isArray(p.payments)?p.payments:[]).map(x=>({id:x.id,subscription_id:p.id,amount:Number(x.amount)||0,currency:'EGP',amount_egp:Number(x.amount)||0,method:x.method||null,note:x.note||null,invoice_number:x.invoiceNumber||null,paid_at:x.date||null,created_by:me,reversed_at:x.reversed?(x.reversedAt||new Date().toISOString()):null,reversed_by:x.reversed?me:null}));
+  if(pays.length){ r=await supabaseClient.from('payments').upsert(pays,{onConflict:'id'}); if(r.error) throw r.error; }
+}
+async function mirrorDirty(){
+  if(!supabaseClient||!isAdmin()) return;
+  let ids=[]; try{ ids=JSON.parse(localStorage.getItem('amjad_fin_dirty')||'[]'); }catch(e){}
+  if(!ids.length) return;
+  const left=[];
+  for(const id of ids){
+    let st=null,pk=null; for(const x of students){ const f=(x.packages||[]).find(q=>q.id===id); if(f){st=x;pk=f;break;} }
+    if(!pk) continue;
+    try{ await mirrorPackage(st,pk); }catch(e){ console.error('finance mirror failed',id,e); left.push(id); }
+  }
+  localStorage.setItem('amjad_fin_dirty',JSON.stringify(left));
+}
+function openPaymentForm(studentId,pkgId){
+  const st=students.find(x=>x.id===studentId); const pkg=st.packages.find(p=>p.id===pkgId);
+  const f=pkgFin(pkg);
+  if(f.net<=0){ toast('حدد مبلغ الباقة بالجنيه أولًا (زر "المبلغ")'); return; }
+  if(f.remaining<=0){ toast('الباقة مدفوعة بالكامل'); return; }
+  const payId=uid(); // ثابت لهذه النافذة: الضغط المتكرر لا يسجل دفعة ثانية
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal">
+    <div class="modal-head"><div class="modal-title">تسجيل دفعة — ${escapeHtml(pkg.subject)}</div><button class="close-btn" id="closeModal">✕</button></div>
+    <div class="package-sub">المتبقي: <b>${fmtEGP(f.remaining)}</b></div>
+    <label class="field-label">المبلغ (ج.م)</label><input type="number" class="field-input" id="py_amount" value="${f.remaining}">
+    <label class="field-label">طريقة الدفع</label><select class="field-input" id="py_method">${PAY_METHODS.map(m=>`<option>${m}</option>`).join('')}</select>
+    <label class="field-label">تاريخ الدفع</label><input type="date" class="field-input" id="py_date" value="${dateStr()}">
+    <label class="field-label">ملاحظة (اختياري)</label><input class="field-input" id="py_note">
+    <button class="submit-btn" id="submitPay">تسجيل الدفعة وإصدار الفاتورة</button></div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('submitPay').addEventListener('click',e=>{
+    e.target.disabled=true;
+    const amount=Math.round((Number(document.getElementById('py_amount').value)||0)*100)/100;
+    const ok=addPayment(st,pkg,{payId,amount,method:document.getElementById('py_method').value,date:document.getElementById('py_date').value||dateStr(),note:document.getElementById('py_note').value.trim()});
+    if(ok){ closeForm(); render(); } else { e.target.disabled=false; }
+  });
+}
+function addPayment(st,pkg,{payId,amount,method,date,note}){
+  if(!Array.isArray(pkg.payments)) pkg.payments=[];
+  if(pkg.payments.some(x=>x.id===payId)||transactions.some(t=>t.id==='pay_'+payId)) return false; // منع التكرار
+  const f=pkgFin(pkg);
+  if(!(amount>0)){ toast('اكتب مبلغًا صحيحًا'); return false; }
+  if(amount>f.remaining+0.001){ toast('المبلغ أكبر من المتبقي ('+f.remaining+')'); return false; }
+  const inv=nextInvoiceNumber(), now=new Date().toISOString();
+  pkg.payments.push({id:payId,amount,method,date,note,invoiceNumber:inv,createdAt:now,reversed:false});
+  pkg.invoiceNumber=inv; pkg.paid=pkgFin(pkg).status==='paid';
+  transactions.push({id:'pay_'+payId,type:'income',category:'اشتراك: '+st.name+' - '+pkg.subject,amount,currency:'EGP',date,note:'فاتورة رقم '+inv+' · '+method+(note?' · '+note:''),invoiceNumber:inv,createdAt:now});
+  saveTransactions(); saveStudents(); markFinDirty(pkg.id); mirrorDirty();
+  generateInvoice(st,pkg,inv,amount); toast('تم تسجيل الدفعة');
+  return true;
+}
+function reversePayment(st,pkg,payId){
+  const x=(pkg.payments||[]).find(y=>y.id===payId); if(!x||x.reversed) return;
+  x.reversed=true; x.reversedAt=new Date().toISOString();
+  pkg.paid=pkgFin(pkg).status==='paid';
+  queueDelete('transactions','pay_'+payId); transactions=transactions.filter(t=>t.id!=='pay_'+payId);
+  saveTransactions(); saveStudents(); markFinDirty(pkg.id); mirrorDirty();
+}
+
 // ---------- INVOICES (professional numbered invoicing) ----------
 function nextInvoiceNumber(){
   let seq=parseInt(localStorage.getItem('amjad_invoice_seq')||'1000',10);
@@ -914,7 +1059,7 @@ function nextInvoiceNumber(){
   localStorage.setItem('amjad_invoice_seq',String(seq));
   return 'AMJ-'+seq;
 }
-function generateInvoice(student,pkg,invoiceNumber){
+function generateInvoice(student,pkg,invoiceNumber,payAmount){
   const canvas=document.createElement('canvas');
   canvas.width=1000; canvas.height=760;
   const ctx=canvas.getContext('2d');
@@ -949,9 +1094,9 @@ function generateInvoice(student,pkg,invoiceNumber){
   ctx.strokeStyle='#C9A227'; ctx.beginPath(); ctx.moveTo(60,500); ctx.lineTo(940,500); ctx.stroke();
 
   ctx.font='bold 26px Tahoma'; ctx.fillStyle='#1F7A4D';
-  ctx.fillText('المبلغ المدفوع: '+Number(pkg.amountEGP||0).toLocaleString('ar')+' جنيه مصري', 940, 550);
+  ctx.fillText('المبلغ المدفوع: '+Number(payAmount!=null?payAmount:(pkg.amountEGP||0)).toLocaleString('ar')+' جنيه مصري', 940, 550);
   ctx.font='bold 18px Tahoma'; ctx.fillStyle='#1F7A4D';
-  ctx.fillText('✓ تم السداد بالكامل', 940, 590);
+  ctx.fillText(payAmount!=null&&pkgFin(pkg).remaining>0?('المتبقي: '+Number(pkgFin(pkg).remaining).toLocaleString('ar')+' جنيه'):'✓ تم السداد بالكامل', 940, 590);
 
   ctx.textAlign='center'; ctx.fillStyle='#8E97A8'; ctx.font='14px Tahoma';
   ctx.fillText('أكاديمية أمجاد — هذه الفاتورة صادرة إلكترونيًا وتُعتمد كإيصال استلام رسمي', 500, 700);
