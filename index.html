@@ -1652,12 +1652,12 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   if(root.innerHTML){root.innerHTML='';return;}
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
     ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="familiesBtn">👪 الأسر وأولياء الأمور</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="teachersFinBtn">👨‍🏫 كشف المعلمين والصرف</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="invoiceInfoBtn">🧾 بيانات الأكاديمية على الإيصال</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="backupsBtn">💾 النسخ الاحتياطية والاسترجاع</div>
-    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportAuditBtn">📒 تقرير المحاسب والمراجع (Excel)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportXlsxBtn">📗 تقرير مالي Excel (.xlsx)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportFinPdfBtn">📄 تقرير مالي PDF (طباعة)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير CSV للمحاسب</div>`:''}
@@ -1665,6 +1665,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   </div>`;
   if(isAdmin()){
   document.getElementById('familiesBtn').addEventListener('click',openFamiliesModal);
+  document.getElementById('teachersFinBtn').addEventListener('click',openTeacherStatements);
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
   document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
   document.getElementById('invoiceInfoBtn').addEventListener('click',()=>{
@@ -1678,7 +1679,6 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
   document.getElementById('backupsBtn').addEventListener('click',openBackupsModal);
-  document.getElementById('exportAuditBtn').addEventListener('click',exportAuditXlsx);
   document.getElementById('exportXlsxBtn').addEventListener('click',exportFinanceXlsx);
   document.getElementById('exportFinPdfBtn').addEventListener('click',exportFinancePdf);
   }
@@ -1870,6 +1870,102 @@ async function refreshBackupsList(note){
     if(e2){ await refreshBackupsList('تعذّر الاسترجاع: '+escapeHtml(e2.message||String(e2))); return; }
     try{ await loadFromCloud(); }catch(e){}
     await refreshBackupsList('✅ تم استرجاع: '+escapeHtml(bkSummary(r.rows_missing_or_restored))+' (أُخذت نسخة أمان قبل الاسترجاع)');
+  }));
+}
+
+// ---------- TEACHER STATEMENTS & PAYOUTS (admin only) ----------
+const tsState={rows:[],adv:[],openId:null};
+async function openTeacherStatements(){
+  if(!isAdmin()||!supabaseClient) return;
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const root=document.getElementById('modalRoot');
+  root.innerHTML='<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">👨‍🏫 كشف المعلمين والصرف</div><button class="close-btn" id="closeModal">✕</button></div><div id="tsBody" class="package-sub">جارٍ التحميل…</div></div></div>';
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  tsState.openId=null; await tsRefresh();
+}
+async function tsRefresh(note){
+  const body=document.getElementById('tsBody'); if(!body) return;
+  const [a,b]=await Promise.all([supabaseClient.from('teacher_statement').select('*'),supabaseClient.from('teacher_advances').select('*')]);
+  if(a.error||b.error){ const e=a.error||b.error; body.innerHTML='تعذّر التحميل: '+escapeHtml(e.message||String(e)); return; }
+  tsState.rows=a.data||[]; tsState.adv=b.data||[];
+  if(tsState.openId) await tsRenderDetail(body,note); else tsRenderList(body,note);
+}
+function tsMoney(v,c){ return r2(v)+' '+escapeHtml(c||''); }
+function tsRenderList(body,note){
+  const byT={};
+  tsState.rows.forEach(r=>{ (byT[r.teacher_id]=byT[r.teacher_id]||{name:r.teacher_name,rows:[]}).rows.push(r); });
+  tsState.adv.forEach(a=>{ if(!byT[a.teacher_id]){ const t=(teachers||[]).find(x=>x.id===a.teacher_id); byT[a.teacher_id]={name:t?t.name:a.teacher_id,rows:[]}; } });
+  const ids=Object.keys(byT).sort((x,y)=>(byT[x].name||'').localeCompare(byT[y].name||'','ar'));
+  body.innerHTML=`
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">المستحق = حصص منفذة <b>معتمدة</b> × سعر الحصة المتفق عليه للمعلم. اعتماد الحصص من كارت كل باقة (👨‍🏫 سعر المعلم والاعتماد).</div>
+    ${note?`<div class="fin-box">${note}</div>`:''}
+    ${ids.map(id=>{ const t=byT[id]; return `<div class="fin-box" data-t="${escapeHtml(id)}" style="cursor:pointer;">
+      <div class="fin-sum"><b>${escapeHtml(t.name||'')}</b></div>
+      ${t.rows.map(r=>`<div class="fin-sum"><span>مستحق: <b>${tsMoney(r.accrued,r.currency)}</b></span><span>مصروف: <b>${tsMoney(r.paid,r.currency)}</b></span><span class="${Number(r.remaining)>0?'fin-rem':'fin-ok'}">متبقي: ${tsMoney(r.remaining,r.currency)}</span>${Number(r.held_sessions)?`<span>⏸️ معلّق: ${r.held_sessions}</span>`:''}</div>`).join('')||'<div class="package-sub">لا مستحقات معتمدة</div>'}
+      ${tsState.adv.filter(a=>a.teacher_id===id&&Number(a.advance)>0).map(a=>`<div class="package-sub">💼 سلفة غير موزعة: ${tsMoney(a.advance,a.currency)}</div>`).join('')}
+    </div>`; }).join('')||'<div class="empty" style="padding:14px;">لا توجد مستحقات معتمدة بعد. اعتمد الحصص المنفذة من كارت الباقة.</div>'}`;
+  body.querySelectorAll('[data-t]').forEach(el=>el.addEventListener('click',async()=>{ tsState.openId=el.dataset.t; await tsRenderDetail(body); }));
+}
+function tsPkgLabel(subId){
+  for(const st of students){ const p=(st.packages||[]).find(q=>q.id===subId); if(p) return st.name+' — '+(p.subject||''); }
+  return 'اشتراك '+subId;
+}
+async function tsRenderDetail(body,note){
+  const tid=tsState.openId;
+  const [dr,pr]=await Promise.all([
+    supabaseClient.from('teacher_dues').select('id,subscription_id,session_date,amount,currency,status').eq('teacher_id',tid).order('session_date'),
+    supabaseClient.from('teacher_payments').select('*').eq('teacher_id',tid).order('paid_at',{ascending:false})
+  ]);
+  if(dr.error||pr.error){ const e=dr.error||pr.error; body.innerHTML='تعذّر التحميل: '+escapeHtml(e.message||String(e)); return; }
+  const dues=dr.data||[], pays=pr.data||[];
+  const voided=new Set(pays.filter(p=>p.voided_at).map(p=>p.id));
+  const paidBy={};
+  if(dues.length){ const ar=await supabaseClient.from('teacher_payment_allocations').select('payment_id,due_id,amount').in('due_id',dues.map(d=>d.id)); (ar.data||[]).forEach(a=>{ if(!voided.has(a.payment_id)) paidBy[a.due_id]=(paidBy[a.due_id]||0)+Number(a.amount); }); }
+  const allocByPay={};
+  const al2=pays.length?await supabaseClient.from('teacher_payment_allocations').select('payment_id,amount').in('payment_id',pays.map(p=>p.id)):{data:[]};
+  (al2.data||[]).forEach(a=>{ allocByPay[a.payment_id]=(allocByPay[a.payment_id]||0)+Number(a.amount); });
+  const t=(teachers||[]).find(x=>x.id===tid);
+  const name=(tsState.rows.find(r=>r.teacher_id===tid)||{}).teacher_name||(t&&t.name)||tid;
+  const curs=Array.from(new Set(dues.map(d=>d.currency))); if(!curs.length) curs.push((t&&CURRENCIES.includes(t.salaryCurrency))?t.salaryCurrency:'EGP');
+  const bySub={};
+  dues.filter(d=>d.status==='approved').forEach(d=>{ const s=(bySub[d.subscription_id]=bySub[d.subscription_id]||{n:0,amt:0,paid:0,cur:d.currency}); s.n++; s.amt+=Number(d.amount); s.paid+=(paidBy[d.id]||0); });
+  const today=new Date().toISOString().slice(0,10);
+  body.innerHTML=`
+    <button class="mini-btn" id="tsBack">← كل المعلمين</button>
+    ${note?`<div class="fin-box" style="margin-top:8px;">${note}</div>`:''}
+    <div style="font-weight:800;margin:10px 0 4px;">${escapeHtml(name)}</div>
+    ${tsState.rows.filter(r=>r.teacher_id===tid).map(r=>`<div class="fin-box"><div class="fin-sum"><span>مستحق: <b>${tsMoney(r.accrued,r.currency)}</b></span><span>مصروف: <b>${tsMoney(r.paid,r.currency)}</b></span><span class="${Number(r.remaining)>0?'fin-rem':'fin-ok'}">متبقي: ${tsMoney(r.remaining,r.currency)}</span></div></div>`).join('')}
+    ${tsState.adv.filter(a=>a.teacher_id===tid&&Number(a.advance)>0).map(a=>`<div class="package-sub">💼 سلفة غير موزعة: ${tsMoney(a.advance,a.currency)}</div>`).join('')}
+    <div style="font-weight:800;margin:14px 0 4px;">💸 تسجيل صرف للمعلم</div>
+    <div class="fin-box">
+      <label class="field-label" style="margin-top:0;">المبلغ</label><input type="number" step="any" class="field-input" id="tp_amt">
+      <label class="field-label">العملة</label><select class="field-input" id="tp_cur">${curs.map(c=>`<option>${escapeHtml(c)}</option>`).join('')}${CURRENCIES.filter(c=>!curs.includes(c)).map(c=>`<option>${c}</option>`).join('')}</select>
+      <label class="field-label">طريقة الدفع</label><select class="field-input" id="tp_method">${PAY_METHODS.map(m=>`<option>${m}</option>`).join('')}</select>
+      <label class="field-label">التاريخ</label><input type="date" class="field-input" id="tp_date" value="${today}">
+      <label class="field-label">ملاحظة</label><input class="field-input" id="tp_note">
+      <div class="package-sub" style="margin-top:6px;">يُوزَّع المبلغ تلقائيًا على أقدم المستحقات المعتمدة بنفس العملة، وما زاد يُسجَّل سلفة.</div>
+      <button class="submit-btn" id="tpSave" style="margin-top:8px;">تسجيل الصرف</button>
+    </div>
+    <div style="font-weight:800;margin:14px 0 4px;">المستحقات حسب الاشتراك</div>
+    ${Object.keys(bySub).map(k=>{ const s=bySub[k]; const rem=r2(s.amt-s.paid); return `<div class="fin-box"><div class="fin-sum"><b>${escapeHtml(tsPkgLabel(k))}</b></div><div class="fin-sum"><span>${s.n} حصة</span><span>مستحق: <b>${tsMoney(s.amt,s.cur)}</b></span><span>مصروف: <b>${tsMoney(s.paid,s.cur)}</b></span><span class="${rem>0?'fin-rem':'fin-ok'}">متبقي: ${tsMoney(rem,s.cur)}</span></div></div>`; }).join('')||'<div class="package-sub">لا مستحقات معتمدة</div>'}
+    <div style="font-weight:800;margin:14px 0 4px;">سجل المدفوعات</div>
+    ${pays.map(p=>`<div class="pay-row ${p.voided_at?'rev':''}"><span>${escapeHtml(p.paid_at||'')}</span><b>${tsMoney(p.amount,p.currency)}</b><span>${escapeHtml(p.method||'')}</span>${p.note?`<span>${escapeHtml(p.note)}</span>`:''}<span>موزّع: ${r2(allocByPay[p.id]||0)}</span>${p.voided_at?'<span>(ملغاة)</span>':`<button class="mini-btn" data-void="${escapeHtml(p.id)}" style="color:#B8391A;border-color:#E7C9C9;">إلغاء</button>`}</div>`).join('')||'<div class="package-sub">لا مدفوعات</div>'}`;
+  document.getElementById('tsBack').addEventListener('click',async()=>{ tsState.openId=null; await tsRefresh(); });
+  document.getElementById('tpSave').addEventListener('click',async e=>{
+    const amt=Number(document.getElementById('tp_amt').value), cur=document.getElementById('tp_cur').value;
+    if(!(amt>0)){ toast('اكتب مبلغًا صحيحًا'); return; }
+    if(!confirm('تسجيل صرف '+amt+' '+cur+' للمعلم '+name+'؟\nسيُوزَّع على أقدم المستحقات المعتمدة بنفس العملة، وما زاد يُسجَّل سلفة.')) return;
+    e.target.disabled=true;
+    const {data,error}=await supabaseClient.rpc('pay_teacher',{p_teacher_id:tid,p_amount:amt,p_currency:cur,p_method:document.getElementById('tp_method').value,p_note:document.getElementById('tp_note').value.trim()||null,p_paid_at:document.getElementById('tp_date').value||today});
+    if(error){ e.target.disabled=false; toast('تعذّر التسجيل: '+(error.message||'')); return; }
+    await tsRefresh('✅ تم تسجيل الصرف — موزّع '+r2(data.allocated)+' '+escapeHtml(cur)+(Number(data.unallocated)>0?' · سلفة '+r2(data.unallocated):''));
+  });
+  body.querySelectorAll('[data-void]').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('إلغاء هذه الدفعة؟ ستبقى في السجل كملغاة وتعود المستحقات المرتبطة بها لتُصرف.')) return;
+    const {error}=await supabaseClient.rpc('void_teacher_payment',{p_id:b.dataset.void});
+    if(error){ toast('تعذّر الإلغاء: '+(error.message||'')); return; }
+    await tsRefresh('تم إلغاء الدفعة');
   }));
 }
 
