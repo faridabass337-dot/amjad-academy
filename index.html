@@ -260,6 +260,7 @@ async function syncStudentsToCloud(){
   try{
     if(students.length){ const {error}=await supabaseClient.from('students').upsert(students.map(s=>{ const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade; return c; }),{onConflict:'id'}); if(error)throw error; } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
     await flushDeletes('students',true);
+    if(isAdmin()) await flushStudentMeta();
     cloudOnline=true;
   }catch(e){ cloudOnline=false; setSyncErr('sync students',e); console.error('sync students failed, remote untouched',e); }
   updateCloudStatus();
@@ -849,24 +850,38 @@ function renderProfile(c){
   c.querySelectorAll('[data-renew]').forEach(b=>b.addEventListener('click',()=>{
     const pkg=s.packages.find(p=>p.id===b.dataset.renew);
     pkg.active=false;
-    openPackageForm(s.id,null,{subject:pkg.subject,teacherId:pkg.teacherId,whatsappGroup:pkg.whatsappGroup});
+    openPackageForm(s.id,null,{subject:pkg.subject,teacherId:pkg.teacherId,whatsappGroup:pkg.whatsappGroup,schedule:pkg.schedule,sessionMinutes:pkg.sessionMinutes});
   }));
   c.querySelectorAll('[data-del-pkg]').forEach(b=>b.addEventListener('click',()=>{
-    if(confirm('حذف الباقة دي نهائيًا؟')){ const did=b.dataset.delPkg; s.packages=s.packages.filter(p=>p.id!==did); saveStudents(); if(isAdmin()&&supabaseClient) supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).eq('id',did).then(r=>{ if(r.error) console.error(r.error); }); render(); }
+    if(confirm('حذف الباقة دي نهائيًا؟')){ const did=b.dataset.delPkg; const gone=s.packages.find(p=>p.id===did); s.packages=s.packages.filter(p=>p.id!==did); if(gone&&gone.schedule&&gone.schedule.length){ const keep=new Set(s.packages.flatMap(p=>(p.schedule||[]).map(schedKey))); const del=new Set(gone.schedule.map(schedKey)); s.schedule=(s.schedule||[]).filter(sl=>!del.has(schedKey(sl))||keep.has(schedKey(sl))); } saveStudents(); if(isAdmin()&&supabaseClient) supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).eq('id',did).then(r=>{ if(r.error) console.error(r.error); }); render(); }
   }));
 }
 
-function openPackageForm(studentId, pkgId, prefill){
+const SUBJECT_SUGGEST=['لغة عربية','لغة إنجليزية','تأسيس إنجليزي','رياضيات','قرآن كريم','عربي وقرآن'];
+function schedKey(sl){ return sl.day+'|'+sl.time; }
+function openPackageForm(studentId, pkgId, prefill, opts){
+  opts=opts||{};
   const s=students.find(x=>x.id===studentId);
   const existing=pkgId?s.packages.find(p=>p.id===pkgId):null;
-  const form=existing||prefill||{subject:s.subject||'',teacherId:'',whatsappGroup:'',totalSessions:8,amount:'',currency:'EGP',amountEGP:'',paid:false};
+  const form=existing||prefill||{subject:(!(s.packages||[]).length?(s.subject||''):''),teacherId:'',whatsappGroup:'',totalSessions:8,amount:'',currency:'EGP',amountEGP:'',paid:false};
+  let sched0=(form.schedule&&form.schedule.length)?form.schedule:((!(s.packages||[]).length&&s.schedule&&s.schedule.length)?s.schedule:[{day:todayKey(),time:'16:00'}]);
+  const used=Array.from(new Set(students.flatMap(x=>(x.packages||[]).map(p=>p.subject)).filter(Boolean)));
+  const subjects=Array.from(new Set(SUBJECT_SUGGEST.concat(used)));
+  const adm=isAdmin();
   const root=document.getElementById('modalRoot');
   root.innerHTML=`
     <div class="modal-overlay" id="overlay">
       <div class="modal">
-        <div class="modal-head"><div class="modal-title">إضافة باقة مادة جديدة</div><button class="close-btn" id="closeModal">✕</button></div>
+        <div class="modal-head"><div class="modal-title">${opts.wizard?'٣ من ٣ — ':''}باقة مادة جديدة</div><button class="close-btn" id="closeModal">✕</button></div>
+        <div class="fin-box" style="margin-top:0;"><div class="fin-sum"><span>الطالب: <b>${escapeHtml(s.name)}</b></span>${opts.familyLabel?`<span>الأسرة: <b>${escapeHtml(opts.familyLabel)}</b></span>`:''}</div></div>
         <label class="field-label">المادة</label>
-        <input class="field-input" id="pf_subject" value="${escapeHtml(form.subject||'')}">
+        <input class="field-input" id="pf_subject" list="pf_subjects" value="${escapeHtml(form.subject||'')}" placeholder="اختر أو اكتب المادة">
+        <datalist id="pf_subjects">${subjects.map(x=>`<option value="${escapeHtml(x)}">`).join('')}</datalist>
+        <label class="field-label">مواعيد الحصص الأسبوعية لهذه المادة</label>
+        <div id="pfSchedRows"></div>
+        <button type="button" class="add-row-btn" id="pfAddSched">+ إضافة موعد تاني</button>
+        <label class="field-label">مدة الحصة (دقيقة)</label>
+        <select class="field-input" id="pf_minutes"><option value="">غير محددة</option>${[30,40,45,60,90].map(m=>`<option value="${m}" ${Number(form.sessionMinutes)===m?'selected':''}>${m} دقيقة</option>`).join('')}</select>
         <label class="field-label">المعلم</label>
         <select class="field-input" id="pf_teacher">
           <option value="">بدون معلم — اكتب اسم جديد تحت</option>
@@ -884,11 +899,32 @@ function openPackageForm(studentId, pkgId, prefill){
         </div>
         <label class="field-label">المبلغ بالجنيه المصري (يدوي)</label>
         <input type="number" class="field-input" id="pf_egp" value="${escapeHtml(form.amountEGP||'')}">
+        ${adm?`<div style="font-weight:800;margin:12px 0 2px;">💼 الأسعار المتفق عليها (اختياري، تقدر تضيفها لاحقًا)</div>
+        <label class="field-label">سعر الحصة على ولي الأمر (بعملة الباقة)</label>
+        <input type="number" step="any" class="field-input" id="pf_prate" placeholder="يُحسب تلقائيًا من المبلغ ÷ الحصص">
+        <div class="field-row">
+          <div><label class="field-label">سعر الحصة للمعلم</label><input type="number" step="any" class="field-input" id="pf_trate"></div>
+          <div><label class="field-label">عملة المعلم</label><select class="field-input" id="pf_tcur">${CURRENCIES.map(c=>`<option value="${c}">${c}</option>`).join('')}</select></div>
+        </div>`:''}
         <button class="submit-btn" id="submitPkg">حفظ الباقة</button>
       </div>
     </div>`;
+  const rowsBox=document.getElementById('pfSchedRows');
+  function addRow(slot){
+    const row=document.createElement('div'); row.className='schedule-row';
+    row.innerHTML=`<select class="sched-day">${DAY_KEYS.map((k,i)=>`<option value="${k}" ${k===slot.day?'selected':''}>${DAYS[i]}</option>`).join('')}</select><input type="time" class="sched-time" value="${slot.time||'16:00'}"><button type="button" class="row-remove">✕</button>`;
+    row.querySelector('.row-remove').addEventListener('click',()=>{ if(rowsBox.children.length>1) row.remove(); else toast('لازم موعد واحد على الأقل'); });
+    rowsBox.appendChild(row);
+  }
+  sched0.forEach(addRow);
+  document.getElementById('pfAddSched').addEventListener('click',()=>addRow({day:todayKey(),time:'16:00'}));
   document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
   document.getElementById('closeModal').addEventListener('click',closeForm);
+  if(adm){
+    const pr=document.getElementById('pf_prate'); let touched=false; pr.addEventListener('input',()=>{ touched=true; });
+    const calc=()=>{ if(touched) return; const a=Number(document.getElementById('pf_amount').value), n=Number(document.getElementById('pf_total').value); pr.value=(a>0&&n>0)?String(Math.round(a/n*100)/100):''; };
+    document.getElementById('pf_amount').addEventListener('input',calc); document.getElementById('pf_total').addEventListener('input',calc); calc();
+  }
   document.getElementById('submitPkg').addEventListener('click',()=>{
     const subject=document.getElementById('pf_subject').value.trim();
     let teacherId=document.getElementById('pf_teacher').value;
@@ -898,15 +934,27 @@ function openPackageForm(studentId, pkgId, prefill){
     const amount=document.getElementById('pf_amount').value.trim();
     const currency=document.getElementById('pf_currency').value;
     const amountEGP=document.getElementById('pf_egp').value.trim();
-    if(!subject) return;
+    const minutes=document.getElementById('pf_minutes').value;
+    const schedule=[...rowsBox.querySelectorAll('.schedule-row')].map(r=>({day:r.querySelector('.sched-day').value,time:r.querySelector('.sched-time').value})).filter(sl=>sl.time);
+    if(!subject){ toast('اكتب المادة'); return; }
+    if(!schedule.length){ toast('أضف موعدًا واحدًا على الأقل'); return; }
     if(newTeacherName){
       const nt={id:uid(),name:newTeacherName,phone:'',subjects:subject,salary:'',salaryCurrency:'EGP',notes:''};
       teachers.push(nt); saveTeachers(); teacherId=nt.id;
     }
     const sessions=Array.from({length:totalSessions},(_,i)=>({date:'',status:'pending'}));
-    const pkg={id:uid(),subject,teacherId,whatsappGroup,totalSessions,sessions,amount,currency,amountEGP,paid:false,receipt:'',active:true,createdAt:dateStr()};
+    const pkg={id:uid(),subject,teacherId,whatsappGroup,totalSessions,sessions,amount,currency,amountEGP,paid:false,receipt:'',active:true,createdAt:dateStr(),schedule,sessionMinutes:minutes?Number(minutes):null};
     s.packages.push(pkg);
-    saveStudents(); markFinDirty(pkg.id); mirrorDirty(); closeForm(); render(); toast('تم إضافة الباقة');
+    // مواعيد الباقة تنعكس على جدول الطالب (اليوم/الأسبوع/التنبيهات) بدون تكرار
+    const have=new Set((s.schedule||[]).map(schedKey)); s.schedule=(s.schedule||[]).slice();
+    schedule.forEach(sl=>{ if(!have.has(schedKey(sl))){ s.schedule.push(sl); have.add(schedKey(sl)); } });
+    if(adm){
+      const tr=document.getElementById('pf_trate').value, pr=document.getElementById('pf_prate').value;
+      if(tr!==''||pr!==''){ const o={rates_frozen_at:new Date().toISOString()}; if(tr!==''){ o.teacher_rate_per_session=Number(tr); o.teacher_rate_currency=document.getElementById('pf_tcur').value; } if(pr!=='') o.parent_rate_per_session=Number(pr); queuePkgRates(pkg.id,o); }
+    }
+    saveStudents(); markFinDirty(pkg.id); mirrorDirty(); if(adm) flushPkgRates();
+    render();
+    if(opts.wizard) wizDone(s,pkg,opts); else { closeForm(); toast('تم إضافة الباقة'); }
   });
 }
 
@@ -993,8 +1041,9 @@ async function mirrorPackage(st,p){
   const f=pkgFin(p);
   const me=currentUser&&currentUser.id||null;
   let teacher=p.teacherId||null;
-  let r=await supabaseClient.from('subscriptions').upsert({id:p.id,student_id:st.id,subject:p.subject,teacher_id:teacher,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},{onConflict:'id'});
-  if(r.error&&teacher){ r=await supabaseClient.from('subscriptions').upsert({id:p.id,student_id:st.id,subject:p.subject,teacher_id:null,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},{onConflict:'id'}); }
+  const smx=(p.sessionMinutes!=null&&p.sessionMinutes!=='')?{session_minutes:Number(p.sessionMinutes)}:{};
+  let r=await supabaseClient.from('subscriptions').upsert(Object.assign({id:p.id,student_id:st.id,subject:p.subject,teacher_id:teacher,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},smx),{onConflict:'id'});
+  if(r.error&&teacher){ r=await supabaseClient.from('subscriptions').upsert(Object.assign({id:p.id,student_id:st.id,subject:p.subject,teacher_id:null,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},smx),{onConflict:'id'}); }
   if(r.error) throw r.error;
   r=await supabaseClient.from('subscription_finance').upsert({subscription_id:p.id,total_amount:Number(p.amount)||0,currency:p.currency||'EGP',total_amount_egp:f.total,discount_amount:f.disc,discount_reason:p.discountReason||null,paid_total_egp:f.paid},{onConflict:'subscription_id'});
   if(r.error) throw r.error;
@@ -1006,7 +1055,7 @@ async function mirrorPackage(st,p){
 async function mirrorDirty(){
   if(!supabaseClient||!isAdmin()) return;
   let ids=[]; try{ ids=JSON.parse(localStorage.getItem('amjad_fin_dirty')||'[]'); }catch(e){}
-  if(!ids.length) return;
+  if(!ids.length){ await flushPkgRates(); return; }
   const left=[];
   for(const id of ids){
     let st=null,pk=null; for(const x of students){ const f=(x.packages||[]).find(q=>q.id===id); if(f){st=x;pk=f;break;} }
@@ -1014,6 +1063,7 @@ async function mirrorDirty(){
     try{ await mirrorPackage(st,pk); }catch(e){ console.error('finance mirror failed',id,e); left.push(id); }
   }
   localStorage.setItem('amjad_fin_dirty',JSON.stringify(left));
+  await flushPkgRates();
 }
 function openPriceForm(studentId,pkgId){
   const st=students.find(x=>x.id===studentId); const pkg=st.packages.find(p=>p.id===pkgId);
@@ -1929,7 +1979,7 @@ async function regSyncAll(){
   const me=currentUser&&currentUser.id||null, tIds=new Set((teachers||[]).map(t=>t.id));
   const subs=[], sess=[];
   students.forEach(st=>(st.packages||[]).forEach(p=>{
-    subs.push({id:p.id,student_id:st.id,subject:p.subject,teacher_id:(p.teacherId&&tIds.has(p.teacherId))?p.teacherId:null,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me});
+    subs.push(Object.assign({id:p.id,student_id:st.id,subject:p.subject,teacher_id:(p.teacherId&&tIds.has(p.teacherId))?p.teacherId:null,whatsapp_group:p.whatsappGroup||null,total_sessions:(p.sessions||[]).length,created_by:me},(p.sessionMinutes!=null&&p.sessionMinutes!=='')?{session_minutes:Number(p.sessionMinutes)}:{}));
     (p.sessions||[]).forEach((ss,i)=>sess.push({id:p.id+'_'+(i+1),subscription_id:p.id,seq:i+1,date:ss.date||null,status:ss.status||'pending',makeup:!!ss.makeup}));
   }));
   if(subs.length){ const r=await supabaseClient.from('subscriptions').upsert(subs,{onConflict:'id'}); if(r.error) throw r.error; }
@@ -2112,6 +2162,7 @@ async function regOpenDetail(r){
     let e1=await supabaseClient.from('students').update({stage:document.getElementById('rd_stage').value.trim()||null,grade:document.getElementById('rd_grade').value.trim()||null}).eq('id',r.student_id);
     let e2=await supabaseClient.from('subscriptions').update({session_minutes:mins===''?null:Number(mins),notes:document.getElementById('rd_notes').value.trim()||null}).eq('id',r.subscription_id);
     const err=e1.error||e2.error; if(err){ toast('تعذّر الحفظ: '+(err.message||'')); return; }
+    const lf=findPkgById(r.subscription_id); if(lf){ lf.pkg.sessionMinutes=mins===''?null:Number(mins); saveStudents(); }
     closeForm(); toast('تم الحفظ'); await regLoad(false); if(currentTab==='register') regBuild();
   });
   try{
@@ -2335,6 +2386,143 @@ async function trRender(st,pkg,note){
   }));
 }
 
+// ---------- REGISTRATION WIZARD: family -> student -> package (admin) ----------
+function pmGet(k){ try{ return JSON.parse(localStorage.getItem(k)||'{}'); }catch(e){ return {}; } }
+function pmSet(k,o){ try{ localStorage.setItem(k,JSON.stringify(o)); }catch(e){} }
+function queueStudentMeta(id,meta){ const o=pmGet('amjad_pending_meta'); o[id]=Object.assign(o[id]||{},meta); pmSet('amjad_pending_meta',o); }
+async function flushStudentMeta(){
+  if(!supabaseClient||!isAdmin()) return;
+  const o=pmGet('amjad_pending_meta'); const ids=Object.keys(o); if(!ids.length) return;
+  for(const id of ids){
+    const s=students.find(x=>x.id===id); if(!s){ delete o[id]; continue; }
+    try{
+      const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade;
+      let r=await supabaseClient.from('students').upsert([c],{onConflict:'id'}); if(r.error) throw r.error;
+      r=await supabaseClient.from('students').update(o[id]).eq('id',id).select('id'); if(r.error) throw r.error;
+      if(r.data&&r.data.length) delete o[id];
+    }catch(e){ console.error('student meta flush failed',id,e); }
+  }
+  pmSet('amjad_pending_meta',o);
+}
+function queuePkgRates(pid,r){ const o=pmGet('amjad_pending_rates'); o[pid]=Object.assign(o[pid]||{},r); pmSet('amjad_pending_rates',o); }
+async function flushPkgRates(){
+  if(!supabaseClient||!isAdmin()) return;
+  const o=pmGet('amjad_pending_rates'); const ids=Object.keys(o); if(!ids.length) return;
+  for(const id of ids){
+    const f=findPkgById(id); if(!f){ delete o[id]; continue; }
+    try{
+      await mirrorPackage(f.st,f.pkg);
+      const r=await supabaseClient.from('subscription_finance').update(o[id]).eq('subscription_id',id).select('subscription_id'); if(r.error) throw r.error;
+      if(r.data&&r.data.length) delete o[id];
+    }catch(e){ console.error('rates flush failed',id,e); }
+  }
+  pmSet('amjad_pending_rates',o);
+}
+const WIZ_STAGES=['رياض أطفال','ابتدائي','إعدادي','ثانوي','جامعي','كبار'];
+function wizShell(step,title,body){
+  const root=document.getElementById('modalRoot');
+  const st=['الأسرة','الطالب','الباقة'].map((n,i)=>`<span style="padding:3px 10px;border-radius:12px;font-size:11.5px;font-weight:800;${i+1===step?'background:var(--gold);color:#0B1B33;':'background:#EFE9D8;color:#777;'}">${i+1}. ${n}</span>`).join('');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">${title}</div><button class="close-btn" id="closeModal">✕</button></div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">${st}</div>${body}</div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+}
+function wizDigits(v){ return String(v||'').replace(/\D/g,''); }
+async function openFamilyWizard(opts){
+  opts=opts||{};
+  if(!isAdmin()||!supabaseClient){ openForm(null); return; }
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  try{ await famLoad(); }catch(e){ toast('تعذّر تحميل الأسر: '+(e.message||'')); openForm(null); return; }
+  if(opts.familyId){ const f=famState.list.find(x=>x.id===opts.familyId); if(f){ wizStudent(wizFamInfo(f)); return; } }
+  wizFamily();
+}
+function wizFamInfo(f){ const g=famState.guardians.filter(x=>x.family_id===f.id); const p=g.find(x=>x.is_primary)||g[0]||null; return {id:f.id,name:f.family_name,code:f.family_code,guardianName:p?p.full_name:'',relation:p?p.relation:'',phone:p?(p.whatsapp||p.phone):''}; }
+function wizFamily(){
+  const countries=Object.keys(FAM_TZ);
+  wizShell(1,'تسجيل جديد — بيانات الأسرة',`
+    <div style="display:flex;gap:6px;margin-bottom:8px;"><button class="mini-btn filled" id="wzNewBtn">أسرة جديدة</button><button class="mini-btn" id="wzOldBtn">أسرة موجودة</button></div>
+    <div id="wzNew">
+      <label class="field-label" style="margin-top:0;">اسم الأسرة</label><input class="field-input" id="wz_fname" placeholder="مثال: أسرة أحمد">
+      <label class="field-label">الدولة</label><select class="field-input" id="wz_country"><option value="">—</option>${countries.map(c=>`<option>${escapeHtml(c)}</option>`).join('')}</select>
+      <div id="wz_tz" class="package-sub"></div>
+      <label class="field-label">اسم ولي الأمر</label><input class="field-input" id="wz_gname">
+      <label class="field-label">الصلة</label><select class="field-input" id="wz_rel"><option>والد</option><option>والدة</option><option>أخرى</option></select>
+      <label class="field-label">رقم واتساب ولي الأمر (مع كود الدولة)</label><input class="field-input" id="wz_phone" dir="ltr" placeholder="+966…">
+      <label class="field-label">ملاحظات الأسرة</label><textarea class="field-input" id="wz_notes" style="min-height:44px;"></textarea>
+    </div>
+    <div id="wzOld" style="display:none;">
+      <input class="search-input" id="wz_q" placeholder="🔍 ابحث باسم الأسرة أو الطالب أو الرقم">
+      <select class="field-input" id="wz_pick" size="6" style="height:auto;"></select>
+      <div id="wz_info" class="package-sub"></div>
+    </div>
+    <button class="submit-btn" id="wzNext">التالي: بيانات الطالب ←</button>`);
+  let mode='new';
+  const setMode=m=>{ mode=m; document.getElementById('wzNew').style.display=m==='new'?'':'none'; document.getElementById('wzOld').style.display=m==='old'?'':'none'; document.getElementById('wzNewBtn').classList.toggle('filled',m==='new'); document.getElementById('wzOldBtn').classList.toggle('filled',m==='old'); };
+  document.getElementById('wzNewBtn').addEventListener('click',()=>setMode('new'));
+  document.getElementById('wzOldBtn').addEventListener('click',()=>{ setMode('old'); drawPick(); });
+  document.getElementById('wz_country').addEventListener('change',e=>{ document.getElementById('wz_tz').textContent=FAM_TZ[e.target.value]?('المنطقة الزمنية: '+FAM_TZ[e.target.value]):''; });
+  const drawPick=()=>{
+    const q=document.getElementById('wz_q').value.trim().toLowerCase();
+    const list=famState.list.filter(f=>{ if(!q) return true; const kids=famState.kids.filter(k=>k.family_id===f.id).map(k=>k.name).join(' '); const gs=famState.guardians.filter(g=>g.family_id===f.id).map(g=>(g.full_name||'')+' '+(g.phone||'')).join(' '); return ((f.family_name||'')+' '+(f.family_code||'')+' '+kids+' '+gs).toLowerCase().includes(q); });
+    document.getElementById('wz_pick').innerHTML=list.map(f=>`<option value="${escapeHtml(f.id)}">${escapeHtml(f.family_name||'')} (${escapeHtml(f.family_code||'')}) — ${famState.kids.filter(k=>k.family_id===f.id).length} أبناء</option>`).join('');
+  };
+  document.getElementById('wz_q').addEventListener('input',drawPick);
+  document.getElementById('wz_pick').addEventListener('change',e=>{ const f=famState.list.find(x=>x.id===e.target.value); if(!f) return; const i=wizFamInfo(f); document.getElementById('wz_info').textContent='ولي الأمر: '+(i.relation||'')+' '+(i.guardianName||'')+' · '+(i.phone||'')+' · الأبناء: '+(famState.kids.filter(k=>k.family_id===f.id).map(k=>k.name).join('، ')||'—'); });
+  document.getElementById('wzNext').addEventListener('click',async e=>{
+    if(mode==='old'){
+      const id=document.getElementById('wz_pick').value; const f=famState.list.find(x=>x.id===id); if(!f){ toast('اختر أسرة من القائمة'); return; }
+      wizStudent(wizFamInfo(f)); return;
+    }
+    const fname=document.getElementById('wz_fname').value.trim(), phone=document.getElementById('wz_phone').value.trim();
+    if(!fname){ toast('اكتب اسم الأسرة'); return; }
+    if(wizDigits(phone).length<8){ toast('اكتب رقم واتساب صحيحًا مع كود الدولة'); return; }
+    const dup=famState.guardians.find(g=>wizDigits(g.phone)===wizDigits(phone)||wizDigits(g.whatsapp)===wizDigits(phone));
+    if(dup){ const f=famState.list.find(x=>x.id===dup.family_id); if(f&&confirm('الرقم ده مسجّل بالفعل للأسرة «'+f.family_name+'» ('+f.family_code+').\nهل تضيف الطالب لنفس الأسرة بدل إنشاء أسرة مكررة؟\n(موافق = نفس الأسرة، إلغاء = إنشاء أسرة جديدة)')){ wizStudent(wizFamInfo(f)); return; } }
+    e.target.disabled=true;
+    const country=document.getElementById('wz_country').value||null;
+    const fr=await supabaseClient.from('families').insert({family_name:fname,country,timezone:FAM_TZ[country]||'Africa/Cairo',notes:document.getElementById('wz_notes').value.trim()||null}).select().single();
+    if(fr.error){ e.target.disabled=false; toast('تعذّر إنشاء الأسرة: '+(fr.error.message||'')); return; }
+    const gname=document.getElementById('wz_gname').value.trim(), rel=document.getElementById('wz_rel').value;
+    const gr=await supabaseClient.from('guardians').insert({family_id:fr.data.id,full_name:gname||('ولي أمر '+fname),relation:rel,phone,whatsapp:phone,is_primary:true});
+    if(gr.error){ e.target.disabled=false; toast('تم إنشاء الأسرة لكن تعذّر حفظ ولي الأمر: '+(gr.error.message||'')); return; }
+    wizStudent({id:fr.data.id,name:fname,code:fr.data.family_code,guardianName:gname,relation:rel,phone});
+  });
+}
+function wizStudent(fam){
+  wizShell(2,'تسجيل جديد — بيانات الطالب',`
+    <div class="fin-box" style="margin-top:0;"><div class="fin-sum"><span>الأسرة: <b>${escapeHtml(fam.name||'')}</b> (${escapeHtml(fam.code||'')})</span><span>ولي الأمر: <b>${escapeHtml((fam.relation||'')+' '+(fam.guardianName||''))}</b></span></div></div>
+    <label class="field-label">اسم الطالب</label><input class="field-input" id="ws_name" placeholder="مثال: عمر أحمد">
+    <label class="field-label">المرحلة الدراسية</label><input class="field-input" id="ws_stage" list="ws_stages" placeholder="اختر أو اكتب"><datalist id="ws_stages">${WIZ_STAGES.map(x=>`<option value="${x}">`).join('')}</datalist>
+    <label class="field-label">الصف الدراسي</label><input class="field-input" id="ws_grade" placeholder="مثال: الصف الثالث">
+    <label class="field-label">ملاحظات عن الطالب (اختياري)</label><textarea class="field-input" id="ws_notes" style="min-height:44px;"></textarea>
+    <button class="submit-btn" id="wsNext">حفظ الطالب والمتابعة للباقة ←</button>
+    <button class="mini-btn" id="wsSkip" style="margin-top:6px;">حفظ الطالب بدون باقة الآن</button>`);
+  const save=async(goPkg)=>{
+    const name=document.getElementById('ws_name').value.trim(); if(!name){ toast('اكتب اسم الطالب'); return; }
+    const sib=famState.kids.find(k=>k.family_id===fam.id&&(k.name||'').trim()===name);
+    if(sib&&!confirm('يوجد طالب بنفس الاسم «'+name+'» في هذه الأسرة. متابعة وإنشاء طالب جديد؟')) return;
+    const stage=document.getElementById('ws_stage').value.trim()||null, grade=document.getElementById('ws_grade').value.trim()||null;
+    const s={id:uid(),name,subject:'',schedule:[],notifyBefore:'10',parentName:fam.relation||'',parentPhone:fam.phone||'',status:'new',permanentNotes:document.getElementById('ws_notes').value.trim(),customFields:[],packages:[],photo:'',createdAt:new Date().toISOString()};
+    students.push(s); saveStudents(); queueStudentMeta(s.id,{family_id:fam.id,stage,grade}); flushStudentMeta();
+    render();
+    if(goPkg) openPackageForm(s.id,null,null,{wizard:true,familyId:fam.id,familyLabel:fam.name}); else { closeForm(); toast('تم حفظ الطالب'); }
+  };
+  document.getElementById('wsNext').addEventListener('click',()=>save(true));
+  document.getElementById('wsSkip').addEventListener('click',()=>save(false));
+}
+function wizDone(s,pkg,opts){
+  wizShell(3,'تم الحفظ ✅',`
+    <div class="fin-box" style="margin-top:0;">تم تسجيل باقة <b>${escapeHtml(pkg.subject)}</b> للطالب <b>${escapeHtml(s.name)}</b>.</div>
+    <button class="submit-btn" id="wdPkg" style="margin-top:6px;">➕ باقة مادة أخرى لنفس الطالب</button>
+    ${opts.familyId?'<button class="mini-btn filled" id="wdKid" style="margin-top:6px;">👦 ابن آخر لنفس الأسرة</button>':''}
+    <button class="mini-btn" id="wdOpen" style="margin-top:6px;">👤 فتح ملف الطالب</button>
+    <button class="mini-btn" id="wdEnd" style="margin-top:6px;">إنهاء</button>`);
+  document.getElementById('wdPkg').addEventListener('click',()=>openPackageForm(s.id,null,null,opts));
+  const k=document.getElementById('wdKid'); if(k) k.addEventListener('click',()=>openFamilyWizard({familyId:opts.familyId}));
+  document.getElementById('wdOpen').addEventListener('click',()=>{ closeForm(); openProfile(s.id); });
+  document.getElementById('wdEnd').addEventListener('click',closeForm);
+}
+
 // ---------- FAMILIES (admin only) ----------
 const FAM_TZ={'السعودية':'Asia/Riyadh','الإمارات':'Asia/Dubai','قطر':'Asia/Qatar','الكويت':'Asia/Kuwait','عُمان':'Asia/Muscat','البحرين':'Asia/Bahrain','مصر':'Africa/Cairo'};
 const famState={list:[],guardians:[],kids:[],q:'',openId:null};
@@ -2432,13 +2620,14 @@ function famRenderDetail(body,note){
       <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"><button class="mini-btn filled g_save">حفظ</button>${g.is_primary?'<span class="package-sub">⭐ أساسي</span>':'<button class="mini-btn g_primary">⭐ اجعله أساسيًا</button>'}</div>
     </div>`).join('')||'<div class="package-sub">لا يوجد ولي أمر</div>'}
     <button class="mini-btn" id="famAddG" style="margin-top:6px;">➕ إضافة ولي أمر</button>
-    <div style="font-weight:800;margin:14px 0 4px;">👦 الأبناء (${kids.length})</div>
+    <div style="font-weight:800;margin:14px 0 4px;">👦 الأبناء (${kids.length}) <button class="mini-btn filled" id="famAddKid" style="margin-inline-start:8px;">➕ إضافة ابن</button></div>
     ${kids.map(k=>`<div class="fin-box" style="display:flex;justify-content:space-between;align-items:center;"><span>${escapeHtml(k.name||'')}</span><button class="mini-btn k_unlink" data-k="${escapeHtml(k.id)}" style="color:#B8391A;">فك الربط</button></div>`).join('')||'<div class="package-sub">لا يوجد أبناء مربوطون</div>'}
     <label class="field-label">ربط طالب بدون أسرة (${free.length})</label>
     <select class="field-input" id="famFree"><option value="">— اختر طالبًا —</option>${free.sort((a,b)=>(a.name||'').localeCompare(b.name||'','ar')).map(k=>`<option value="${escapeHtml(k.id)}">${escapeHtml(k.name||'')}</option>`).join('')}</select>
     <button class="mini-btn filled" id="famLink" style="margin-top:6px;">🔗 ربط بهذه الأسرة</button>`;
   const fail=(e)=>toast('تعذّر الحفظ: '+((e&&e.message)||''));
   document.getElementById('famBack').addEventListener('click',()=>{ famState.openId=null; famRefresh(); });
+  document.getElementById('famAddKid').addEventListener('click',()=>openFamilyWizard({familyId:f.id}));
   document.getElementById('famSave').addEventListener('click',async()=>{
     const name=document.getElementById('fam_name').value.trim(); if(!name){ toast('اكتب اسم الأسرة'); return; }
     const {error}=await supabaseClient.from('families').update({family_name:name,country:document.getElementById('fam_country').value||null,timezone:document.getElementById('fam_tz').value||null,notes:document.getElementById('fam_notes').value.trim()||null}).eq('id',f.id);
@@ -2572,6 +2761,7 @@ document.getElementById('importFile').addEventListener('change',e=>{
 document.getElementById('fabAdd').addEventListener('click',()=>{
   if(currentTab==='finance') openTxForm();
   else if(currentTab==='teachers') openTeacherForm(null);
+  else if(isAdmin()) openFamilyWizard();
   else openForm(null);
 });
 
