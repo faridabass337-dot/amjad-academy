@@ -765,6 +765,7 @@ function renderProfile(c){
         ${isAdmin()?`<button class="mini-btn filled" data-add-pay="${p.id}">💳 تسجيل دفعة</button>
         <button class="mini-btn" data-discount="${p.id}">🏷️ خصم</button>
         <button class="mini-btn" data-set-amount="${p.id}">✏️ السعر والعملة</button>
+        <button class="mini-btn" data-teacher-rate="${p.id}">👨‍🏫 سعر المعلم والاعتماد</button>
         <button class="mini-btn" data-upload-receipt="${p.id}">📎 إيصال</button>`:''}
         <button class="mini-btn" data-remind="${p.id}">📲 تذكير تجديد</button>
         <button class="mini-btn" data-makeup="${p.id}">➕ حصة تعويضية</button>
@@ -816,6 +817,7 @@ function renderProfile(c){
     saveStudents(); markFinDirty(pkg.id); mirrorDirty(); render(); toast('تم تحديث الخصم');
   }));
   c.querySelectorAll('[data-set-amount]').forEach(b=>b.addEventListener('click',()=>openPriceForm(s.id,b.dataset.setAmount)));
+  c.querySelectorAll('[data-teacher-rate]').forEach(b=>b.addEventListener('click',()=>openTeacherRateForm(s.id,b.dataset.teacherRate)));
   c.querySelectorAll('[data-rev-pay]').forEach(b=>b.addEventListener('click',()=>{
     const [pid,yid]=b.dataset.revPay.split('|'); const pkg=s.packages.find(p=>p.id===pid);
     if(confirm('إلغاء هذه الدفعة؟ ستبقى في السجل كملغاة ويُخصم إيرادها.')){ reversePayment(s,pkg,yid); render(); toast('تم إلغاء الدفعة'); }
@@ -1868,6 +1870,89 @@ async function refreshBackupsList(note){
     if(e2){ await refreshBackupsList('تعذّر الاسترجاع: '+escapeHtml(e2.message||String(e2))); return; }
     try{ await loadFromCloud(); }catch(e){}
     await refreshBackupsList('✅ تم استرجاع: '+escapeHtml(bkSummary(r.rows_missing_or_restored))+' (أُخذت نسخة أمان قبل الاسترجاع)');
+  }));
+}
+
+// ---------- TEACHER RATES & DUES APPROVAL (admin only) ----------
+async function openTeacherRateForm(studentId,pkgId){
+  if(!isAdmin()||!supabaseClient) return;
+  const st=students.find(x=>x.id===studentId); const pkg=st&&(st.packages||[]).find(p=>p.id===pkgId); if(!pkg) return;
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">👨‍🏫 سعر المعلم والاعتماد — ${escapeHtml(pkg.subject||'')}</div><button class="close-btn" id="closeModal">✕</button></div><div id="trBody" class="package-sub">جارٍ التحميل…</div></div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  await trRender(st,pkg);
+}
+async function trRender(st,pkg,note){
+  const body=document.getElementById('trBody'); if(!body) return;
+  try{ await mirrorPackage(st,pkg); }catch(e){ body.innerHTML='تعذّرت المزامنة مع القاعدة: '+escapeHtml(e.message||String(e)); return; }
+  const [fr,dr,sr]=await Promise.all([
+    supabaseClient.from('subscription_finance').select('*').eq('subscription_id',pkg.id),
+    supabaseClient.from('teacher_dues').select('id,session_date,amount,currency,status').eq('subscription_id',pkg.id).order('session_date'),
+    supabaseClient.from('subscription_sessions').select('id,status').eq('subscription_id',pkg.id)
+  ]);
+  const err=fr.error||dr.error||sr.error; if(err){ body.innerHTML='تعذّر التحميل: '+escapeHtml(err.message||String(err)); return; }
+  const fin=(fr.data||[])[0]||{}, dues=dr.data||[], sess=sr.data||[];
+  const allocated=new Set();
+  if(dues.length){ const ar=await supabaseClient.from('teacher_payment_allocations').select('due_id').in('due_id',dues.map(d=>d.id)); (ar.data||[]).forEach(a=>allocated.add(a.due_id)); }
+  const attended=sess.filter(x=>x.status==='attended').length;
+  const waiting=Math.max(attended-dues.length,0);
+  const locked=dues.length>0;
+  const teacher=(teachers||[]).find(t=>t.id===pkg.teacherId);
+  const cur0=fin.teacher_rate_currency||((teacher&&CURRENCIES.includes(teacher.salaryCurrency))?teacher.salaryCurrency:'EGP');
+  const n=(pkg.sessions||[]).length;
+  const sugg=(n>0&&Number(pkg.amount)>0)?r2(Number(pkg.amount)/n):'';
+  const hasRate=fin.teacher_rate_per_session!=null;
+  const approvedSum=r2(dues.filter(d=>d.status==='approved').reduce((a,d)=>a+Number(d.amount||0),0));
+  const stLbl={approved:'معتمد',hold:'معلّق',void:'ملغي'};
+  body.innerHTML=`
+    ${note?`<div class="fin-box">${note}</div>`:''}
+    <div class="fin-box">
+      <div class="fin-sum"><span>المعلم: <b>${teacher?escapeHtml(teacher.name):'— غير محدد'}</b></span><span>الحصص: <b>${n}</b></span><span>المنفذة: <b>${attended}</b></span></div>
+      ${teacher?'':'<div style="color:#B8391A;">حدّد معلم الباقة أولًا (من تعديل الباقة) حتى تُحتسب المستحقات.</div>'}
+    </div>
+    <label class="field-label">سعر الحصة على ولي الأمر (بعملة الباقة ${escapeHtml(pkgCur(pkg))})${sugg!==''?' — مقترح '+sugg:''}</label>
+    <input type="number" step="any" class="field-input" id="tr_parent" value="${fin.parent_rate_per_session!=null?escapeHtml(String(fin.parent_rate_per_session)):''}" ${locked?'disabled':''}>
+    <label class="field-label">سعر الحصة للمعلم</label>
+    <input type="number" step="any" class="field-input" id="tr_rate" value="${hasRate?escapeHtml(String(fin.teacher_rate_per_session)):''}" ${locked?'disabled':''}>
+    <label class="field-label">عملة المعلم</label>
+    <select class="field-input" id="tr_cur" ${locked?'disabled':''}>${CURRENCIES.map(c=>`<option ${c===cur0?'selected':''}>${c}</option>`).join('')}</select>
+    ${locked?`<div class="package-sub" style="margin-top:6px;">🔒 الأسعار مقفولة لوجود ${dues.length} مستحق معتمد. السعر المجمّد وقت الاعتماد لا يتغير بأثر رجعي.</div>`:`<div id="trMargin" class="package-sub" style="margin-top:6px;"></div><button class="submit-btn" id="trSave">حفظ الأسعار</button>`}
+    <div style="font-weight:800;margin:16px 0 4px;">المستحقات</div>
+    <div class="fin-box">
+      <div class="fin-sum"><span>حصص منفذة تنتظر الاعتماد: <b>${waiting}</b></span><span>مستحقات معتمدة: <b>${approvedSum} ${escapeHtml(dues[0]?dues[0].currency:cur0)}</b></span></div>
+      <button class="mini-btn filled" id="trApprove" ${(!waiting||!teacher)?'disabled':''}>✅ اعتماد الحصص المنفذة (${waiting})</button>
+      ${!hasRate&&waiting?'<div class="package-sub" style="margin-top:6px;">احفظ سعر المعلم أولًا لتتمكن من الاعتماد.</div>':''}
+    </div>
+    ${dues.map(d=>`<div class="pay-row"><span>${escapeHtml(d.session_date||'')}</span><b>${escapeHtml(String(d.amount))} ${escapeHtml(d.currency||'')}</b><span>${stLbl[d.status]||escapeHtml(d.status)}${allocated.has(d.id)?' · 💸 مصروف':''}</span>${allocated.has(d.id)?'':`<button class="mini-btn" data-due="${escapeHtml(d.id)}" data-to="${d.status==='hold'?'approved':'hold'}">${d.status==='hold'?'إعادة اعتماد':'تعليق'}</button>`}</div>`).join('')}`;
+  const upMargin=()=>{
+    const el=document.getElementById('trMargin'); if(!el) return;
+    const pr=Number(document.getElementById('tr_parent').value), tr=Number(document.getElementById('tr_rate').value), c=document.getElementById('tr_cur').value;
+    el.textContent=(pr>0&&tr>=0&&c===pkgCur(pkg))?('هامش الأكاديمية للحصة: '+r2(pr-tr)+' '+c):(pr>0&&tr>=0?'عملة المعلم تختلف عن عملة الباقة، الهامش يُحسب لاحقًا بالجنيه.':'');
+  };
+  ['tr_parent','tr_rate','tr_cur'].forEach(id=>{ const e=document.getElementById(id); if(e){ e.addEventListener('input',upMargin); e.addEventListener('change',upMargin); } }); upMargin();
+  const sv=document.getElementById('trSave');
+  if(sv) sv.addEventListener('click',async()=>{
+    const tr=document.getElementById('tr_rate').value, pr=document.getElementById('tr_parent').value;
+    if(tr===''||!(Number(tr)>=0)){ toast('اكتب سعر الحصة للمعلم'); return; }
+    if(pr!==''&&!(Number(pr)>=0)){ toast('سعر ولي الأمر غير صحيح'); return; }
+    const {error}=await supabaseClient.from('subscription_finance').update({teacher_rate_per_session:Number(tr),teacher_rate_currency:document.getElementById('tr_cur').value,parent_rate_per_session:pr===''?null:Number(pr),rates_frozen_at:new Date().toISOString()}).eq('subscription_id',pkg.id);
+    if(error){ toast('تعذّر الحفظ: '+(error.message||'')); return; }
+    await trRender(st,pkg,'✅ تم حفظ الأسعار');
+  });
+  const ap=document.getElementById('trApprove');
+  if(ap) ap.addEventListener('click',async()=>{
+    if(!hasRate){ toast('احفظ سعر المعلم أولًا'); return; }
+    if(!confirm('اعتماد '+waiting+' حصة بسعر '+fin.teacher_rate_per_session+' '+(fin.teacher_rate_currency||cur0)+' للحصة (الإجمالي '+r2(waiting*Number(fin.teacher_rate_per_session))+').\nبعد الاعتماد يتجمّد السعر ولا يتغير. متابعة؟')) return;
+    ap.disabled=true;
+    const {data,error}=await supabaseClient.rpc('approve_teacher_sessions',{p_subscription_id:pkg.id});
+    if(error){ await trRender(st,pkg,'تعذّر الاعتماد: '+escapeHtml(error.message||String(error))); return; }
+    await trRender(st,pkg,'✅ تم اعتماد '+(data&&data.approved||0)+' حصة'+((data&&data.missing_rate)?' · ناقص سعر: '+data.missing_rate:'')+((data&&data.missing_teacher)?' · بدون معلم: '+data.missing_teacher:''));
+  });
+  body.querySelectorAll('[data-due]').forEach(b=>b.addEventListener('click',async()=>{
+    const {error}=await supabaseClient.from('teacher_dues').update({status:b.dataset.to}).eq('id',b.dataset.due);
+    if(error){ toast('تعذّر التحديث: '+(error.message||'')); return; }
+    await trRender(st,pkg,b.dataset.to==='hold'?'تم تعليق المستحق':'تمت إعادة الاعتماد');
   }));
 }
 
