@@ -389,9 +389,10 @@ const MORE_TABS = [
   {key:'week', label:'📆 الأسبوع'},
   {key:'stats', label:'📊 إحصائيات'},
   {key:'supervisors', label:'🛡️ المشرفين'},
+  {key:'ceo', label:'🏢 لوحة المدير'},
   {key:'register', label:'📋 سجل الاشتراكات'},
 ];
-const ADMIN_ONLY_TABS = ['stats','supervisors'];
+const ADMIN_ONLY_TABS = ['stats','supervisors','ceo'];
 document.getElementById('moreTabBtn').addEventListener('click',(e)=>{
   e.stopPropagation();
   const root = document.getElementById('moreMenuRoot');
@@ -426,7 +427,7 @@ function render(){
   }
   tabsBar.style.display='flex';
   applyRoleUI();
-  fab.style.display = (currentTab==='stats'||currentTab==='week'||currentTab==='supervisors'||currentTab==='register') ? 'none' : 'flex';
+  fab.style.display = (currentTab==='stats'||currentTab==='week'||currentTab==='supervisors'||currentTab==='register'||currentTab==='ceo') ? 'none' : 'flex';
   const pendingCount = bookings.filter(b=>b.status==='pending').length;
   const bkBtn = document.getElementById('bookingsTabBtn');
   if(bkBtn) bkBtn.innerHTML = `📅 الحجوزات${pendingCount>0?` <span style="background:#B8391A;color:#fff;border-radius:10px;padding:1px 6px;font-size:10.5px;">${pendingCount}</span>`:''}`;
@@ -438,6 +439,7 @@ function render(){
   else if(currentTab==='stats') renderStats(c);
   else if(currentTab==='supervisors') renderSupervisors(c);
   else if(currentTab==='register') renderRegister(c);
+  else if(currentTab==='ceo') renderCeo(c);
   else renderWeek(c);
 }
 
@@ -859,6 +861,64 @@ function renderProfile(c){
 
 const SUBJECT_SUGGEST=['لغة عربية','لغة إنجليزية','تأسيس إنجليزي','رياضيات','قرآن كريم','عربي وقرآن'];
 function schedKey(sl){ return sl.day+'|'+sl.time; }
+
+// ===== لوحة المدير: المحصَّل / المستحق (المتعاقد) / المكتسب =====
+const ceoState={month:''};
+function ceoCompute(rows){
+  const T={contracts:0,collected:0,receivable:0,earned:0,deferred:0,deliveredUnpaid:0,noPrice:0,active:0,subs:rows.length};
+  const subj={}, teach={}, pay={};
+  rows.forEach(r=>{
+    const net=regNum(r.net_egp), paid=regNum(r.paid_egp), n=regNum(r.total_sessions), att=regNum(r.attended);
+    const earned=(net>0&&n>0)?Math.min(net,net*Math.min(att,n)/n):0;
+    T.contracts+=net; T.collected+=paid; T.receivable+=Math.max(net-paid,0); T.earned+=earned;
+    T.deferred+=Math.max(paid-earned,0); T.deliveredUnpaid+=Math.max(earned-paid,0);
+    if(!(net>0)) T.noPrice++; if(r.package_status==='نشطة') T.active++;
+    const sk=r.subject||'—', tk=r.teacher_name||'بدون معلم';
+    const a=subj[sk]||(subj[sk]={n:0,contracts:0,collected:0,earned:0}); a.n++; a.contracts+=net; a.collected+=paid; a.earned+=earned;
+    const t=teach[tk]||(teach[tk]={n:0,attended:0,contracts:0,earned:0,due:{},paid:{}}); t.n++; t.attended+=att; t.contracts+=net; t.earned+=earned;
+    const cur=r.teacher_due_currency||'EGP'; t.due[cur]=(t.due[cur]||0)+regNum(r.teacher_due); t.paid[cur]=(t.paid[cur]||0)+regNum(r.teacher_paid);
+    const ps=r.pay_status||'—'; pay[ps]=(pay[ps]||0)+1;
+  });
+  return {T,subj,teach,pay,tot:regTotals(rows)};
+}
+function renderCeo(c){
+  c.innerHTML='<div id="ceoRoot"><div class="empty">جارٍ تحميل اللوحة…</div></div>';
+  (async()=>{ if(!supabaseClient){ document.getElementById('ceoRoot').innerHTML='<div class="empty">اللوحة تحتاج اتصالًا بالسحابة</div>'; return; }
+    await regLoad(false); if(currentTab==='ceo'&&document.getElementById('ceoRoot')) ceoDraw(); })();
+}
+function ceoDraw(){
+  const root=document.getElementById('ceoRoot'); if(!root) return;
+  if(regState.err){ root.innerHTML='<div class="empty">تعذّر تحميل البيانات: '+escapeHtml(regState.err)+'</div>'; return; }
+  const rows=regState.rows, D=ceoCompute(rows), T=D.T, f=regFmt;
+  const card=(l,v,sub,col)=>`<div style="background:#fff;border:1px solid #E7DFC7;border-radius:14px;padding:12px;"><div style="font-size:12px;color:#777;">${l}</div><div style="font-size:21px;font-weight:900;color:${col||'#222'};margin-top:2px;">${v}</div>${sub?`<div style="font-size:11px;color:#888;margin-top:2px;">${sub}</div>`:''}</div>`;
+  const dueU=regUnpaidMap(D.tot);
+  const sec=(t,b)=>`<div style="margin-top:16px;"><div style="font-weight:900;font-size:14px;margin-bottom:6px;">${t}</div>${b}</div>`;
+  const tbl=(head,body)=>`<div style="overflow-x:auto;background:#fff;border:1px solid #E7DFC7;border-radius:12px;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#F6F0DE;">${head.map(h=>`<th style="padding:7px;text-align:right;white-space:nowrap;">${h}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const td=v=>`<td style="padding:7px;border-top:1px solid #F0EAD6;white-space:nowrap;">${v}</td>`;
+  const subjRows=Object.keys(D.subj).sort((a,b)=>D.subj[b].contracts-D.subj[a].contracts).map(k=>{const a=D.subj[k]; return '<tr>'+td(escapeHtml(k))+td(a.n)+td(f(a.contracts))+td(f(a.collected))+td(f(a.earned))+'</tr>';}).join('');
+  const teachRows=Object.keys(D.teach).sort((a,b)=>D.teach[b].earned-D.teach[a].earned).map(k=>{const t=D.teach[k]; const cur=Object.keys(t.due).filter(x=>t.due[x]||t.paid[x]); const rem=cur.length?cur.map(x=>f(t.due[x]-(t.paid[x]||0))+' '+x).join(' + '):'0'; return '<tr>'+td(escapeHtml(k))+td(t.n)+td(t.attended)+td(f(t.earned))+td(rem)+'</tr>';}).join('');
+  const payRows=Object.keys(D.pay).map(k=>'<tr>'+td(regBadge('pay',k)||escapeHtml(k))+td(D.pay[k])+'</tr>').join('');
+  root.innerHTML=`<div style="padding:4px 0 80px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:900;font-size:16px;">🏢 لوحة المدير</div><button class="mini-btn" id="ceoRefresh">⟳ تحديث</button></div>
+    <div style="font-size:11px;color:#888;margin:2px 0 8px;">كل المبالغ بالجنيه المصري حسب السعر المتفق عليه وقت التعاقد. الأرقام مبنية على سجل الاشتراكات (${T.subs} اشتراك).</div>
+    ${regState.warn?`<div style="background:#FFF3D6;border-radius:10px;padding:8px;font-size:12px;margin-bottom:8px;">${escapeHtml(regState.warn)}</div>`:''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      ${card('المتعاقد عليه (المستحق)',f(T.contracts),'مجموع أسعار الباقات بعد الخصم')}
+      ${card('المحصَّل فعليًا',f(T.collected),'مدفوعات مؤكدة فقط','#1E7A46')}
+      ${card('المتبقي على أولياء الأمور',f(T.receivable),'متعاقد − محصَّل','#B8391A')}
+      ${card('الإيراد المكتسب',f(T.earned),'حصص منفّذة × سعر الحصة','#35508C')}
+      ${card('محصَّل لم يُكتسب بعد',f(T.deferred),'التزام: حصص مدفوعة لم تُنفَّذ','#9A6A00')}
+      ${card('منفَّذ لم يُحصَّل',f(T.deliveredUnpaid),'حصص أُعطيت دون سداد كامل','#8B1A1A')}
+    </div>
+    ${sec('مستحقات المعلمين',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">${card('إجمالي المستحق',regCurMap(D.tot.due))}${card('المصروف',regCurMap(D.tot.tpaid),'','#1E7A46')}${card('المتبقي للمعلمين',regCurMap(dueU),'','#B8391A')}${card('اشتراكات نشطة',T.active,'من '+T.subs)}</div>`)}
+    ${T.noPrice?`<div style="background:#FBE3E0;border-radius:10px;padding:8px;font-size:12px;margin-top:10px;">⚠️ ${T.noPrice} اشتراك بدون سعر متفق عليه، لا تدخل أرقامه في المتعاقد والمكتسب. أكمل أسعارها من سجل الاشتراكات.</div>`:''}
+    ${sec('حسب المادة',tbl(['المادة','اشتراكات','متعاقد','محصَّل','مكتسب'],subjRows))}
+    ${sec('حسب المعلم',tbl(['المعلم','اشتراكات','حصص منفذة','مكتسب','متبقي له'],teachRows))}
+    ${sec('حالات السداد',tbl(['الحالة','العدد'],payRows))}
+    <div style="font-size:11px;color:#888;margin-top:10px;">الأسر: ${D.tot.families} · الطلاب: ${D.tot.students}</div>
+  </div>`;
+  document.getElementById('ceoRefresh').addEventListener('click',async()=>{ await regLoad(true); ceoDraw(); });
+}
 // ===== المواعيد الأسبوعية: وقت النهاية، تعارض المعلم/الطالب، توقيت الأسرة =====
 const ACADEMY_TZ='Africa/Cairo', DEFAULT_LESSON_MIN=60;
 function t2m(t){ const m=/^(\d{1,2}):(\d{2})/.exec(t||''); return m?Number(m[1])*60+Number(m[2]):null; }
