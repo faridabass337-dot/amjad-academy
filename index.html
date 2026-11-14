@@ -1869,6 +1869,35 @@ function renderBookings(c){
 }
 
 // ---------- Supervisors management (admin only) ----------
+async function supAdminCall(body){
+  const r=await supabaseClient.functions.invoke('admin-users',{body});
+  if(r.error){ let m=r.error.message||String(r.error);
+    try{ if(r.error.context&&r.error.context.json){ const j=await r.error.context.json(); if(j&&j.error) m=j.error; } }catch(e){}
+    if(/not found|Failed to send|FunctionsFetch|404/i.test(m)) m='خدمة إدارة المستخدمين غير مفعّلة بعد على Supabase (دالة admin-users). انشرها أولًا ثم أعد المحاولة.\n'+m;
+    throw new Error(m); }
+  if(r.data&&r.data.error) throw new Error(r.data.error);
+  return r.data;
+}
+function supCreateDialog(c){
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">➕ مشرف جديد</div><button class="close-btn" id="closeModal">✕</button></div>
+    <label class="field-label" style="margin-top:0;">الاسم</label><input class="field-input" id="su_name">
+    <label class="field-label">البريد الإلكتروني (للدخول)</label><input class="field-input" id="su_email" type="email" dir="ltr">
+    <label class="field-label">كلمة السر (8 أحرف على الأقل)</label><input class="field-input" id="su_pass" dir="ltr">
+    <div class="package-sub">يُنشأ الحساب مفعّلًا بصلاحية مشرف، ثم تعيّن له الطلاب من «تعيين الطلاب». أبلغ المشرف ببياناته بنفسك.</div>
+    <button class="submit-btn" id="su_go">إنشاء الحساب</button></div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('su_go').addEventListener('click',async e=>{
+    const full_name=document.getElementById('su_name').value.trim(), email=document.getElementById('su_email').value.trim().toLowerCase(), password=document.getElementById('su_pass').value;
+    if(!full_name){ toast('اكتب اسم المشرف'); return; }
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ toast('بريد غير صالح'); return; }
+    if(password.length<8){ toast('كلمة السر أقصر من 8 أحرف'); return; }
+    e.target.disabled=true;
+    try{ await supAdminCall({action:'create_supervisor',email,password,full_name}); closeForm(); toast('تم إنشاء المشرف'); renderSupervisors(c); }
+    catch(err){ e.target.disabled=false; alert(err.message); }
+  });
+}
 async function renderSupervisors(c){
   if(!isAdmin()) return;
   c.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">جاري التحميل...</div>';
@@ -1878,9 +1907,11 @@ async function renderSupervisors(c){
   ]);
   if(pr.error||ar.error){ c.innerHTML='<div style="text-align:center;padding:30px;color:#B8391A;font-size:13px;">تعذر تحميل بيانات المشرفين</div>'; return; }
   const sups=pr.data||[]; let assigns=ar.data||[];
-  if(!sups.length){ c.innerHTML='<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">لا يوجد مشرفين بعد. أضف المستخدم من Supabase ثم سجّله كمشرف.</div>'; return; }
+  const supBar='<div style="margin-bottom:10px;"><button class="mini-btn filled" id="supAdd">➕ مشرف جديد</button></div>';
+  const wireAdd=()=>{ const a=c.querySelector('#supAdd'); if(a) a.addEventListener('click',()=>supCreateDialog(c)); };
+  if(!sups.length){ c.innerHTML=supBar+'<div style="text-align:center;padding:30px;color:var(--muted);font-size:13px;">لا يوجد مشرفين بعد. اضغط «➕ مشرف جديد».</div>'; wireAdd(); return; }
   const sorted=[...students].sort((a,b)=>(a.name||'').localeCompare(b.name||'','ar'));
-  c.innerHTML=sups.map(sp=>{
+  c.innerHTML=supBar+sups.map(sp=>{
     const mine=new Set(assigns.filter(a=>a.supervisor_id===sp.id).map(a=>a.student_id));
     const label=sp.full_name||('مشرف '+String(sp.id).slice(0,6));
     return `<div class="package-card" data-sup="${sp.id}">
@@ -1892,6 +1923,7 @@ async function renderSupervisors(c){
       <div class="package-footer">
         <button class="mini-btn ${sp.active?'':'filled'}" data-sup-toggle="${sp.id}">${sp.active?'إيقاف الحساب':'تفعيل الحساب'}</button>
         <button class="mini-btn" data-sup-rename="${sp.id}">✏️ تسمية</button>
+        <button class="mini-btn" data-sup-pass="${sp.id}">🔑 كلمة سر جديدة</button>
       </div>
       <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">تعيين الطلاب</summary>
         <div style="max-height:320px;overflow:auto;margin-top:8px;">
@@ -1900,6 +1932,12 @@ async function renderSupervisors(c){
       </details>
     </div>`;
   }).join('');
+  wireAdd();
+  c.querySelectorAll('[data-sup-pass]').forEach(b=>b.addEventListener('click',async()=>{
+    const sp=sups.find(x=>x.id===b.dataset.supPass); const pw=prompt('كلمة السر الجديدة للمشرف «'+(sp.full_name||'')+'» (8 أحرف على الأقل):'); if(pw===null) return;
+    if(pw.length<8){ toast('كلمة السر أقصر من 8 أحرف'); return; }
+    try{ await supAdminCall({action:'reset_password',user_id:sp.id,password:pw}); toast('تم تغيير كلمة السر. أبلغ المشرف بها.'); }catch(e){ alert(e.message); }
+  }));
   c.querySelectorAll('[data-assign]').forEach(cb=>cb.addEventListener('change',async()=>{
     const sid=cb.dataset.assign, stu=cb.dataset.stu;
     cb.disabled=true;
