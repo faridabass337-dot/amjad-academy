@@ -699,6 +699,7 @@ function renderProfile(c){
         <button class="profile-action-btn" id="editBasicBtn">✏️ تعديل البيانات</button>
         <button class="profile-action-btn" id="waBtn">💬 واتساب</button>
         <button class="profile-action-btn" id="printBtn">🖨️ طباعة الملف</button>
+        <button class="profile-action-btn" id="eduRepBtn">📄 تقرير تعليمي PDF</button>
       </div>
     </div>
   `;
@@ -710,6 +711,7 @@ function renderProfile(c){
     window.open(`https://wa.me/${s.parentPhone.replace(/[^0-9]/g,'')}`,'_blank');
   });
   header.querySelector('#printBtn').addEventListener('click',()=>window.print());
+  header.querySelector('#eduRepBtn').addEventListener('click',()=>printEduReport(s));
   header.querySelector('#photoBox').addEventListener('click',()=>{
     const inp=document.getElementById('photoInput');
     inp.onchange=e=>{ const f=e.target.files[0]; if(!f)return; resizeImage(f,300,dataUrl=>{ s.photo=dataUrl; saveStudents(); render(); }); };
@@ -918,6 +920,275 @@ function ceoDraw(){
     <div style="font-size:11px;color:#888;margin-top:10px;">الأسر: ${D.tot.families} · الطلاب: ${D.tot.students}</div>
   </div>`;
   document.getElementById('ceoRefresh').addEventListener('click',async()=>{ await regLoad(true); ceoDraw(); });
+}
+
+// ===== التقرير التعليمي (يُطبع/يُحفظ PDF) =====
+function eduReportHtml(s,withFin){
+  const E=escapeHtml, ST={attended:'حضر',absent:'غاب',pending:'لم تُنفَّذ بعد'};
+  const th='border:1px solid #ccc;padding:5px;background:#f0eada;text-align:right;', td='border:1px solid #ccc;padding:5px;';
+  const h2=t=>'<h2 style="font-size:15px;border-bottom:2px solid #C9A227;padding-bottom:4px;margin:16px 0 8px;">'+t+'</h2>';
+  const pk=(s.packages||[]);
+  const all=pk.reduce((a,p)=>a.concat(p.sessions||[]),[]);
+  const att=all.filter(x=>x.status==='attended').length, abs=all.filter(x=>x.status==='absent').length;
+  const done=att+abs, pct=done?Math.round(att/done*100):0;
+  const dayName=sl=>DAYS[DAY_KEYS.indexOf(sl.day)]+' '+sl.time;
+  let h='<div style="text-align:center;margin-bottom:14px;"><img src="icon-192.png" style="width:70px;height:70px;border-radius:50%;"><h1 style="font-size:21px;margin:6px 0 2px;">أكاديمية أمجاد</h1><div style="font-size:14px;font-weight:700;">تقرير متابعة الطالب</div><div style="font-size:11px;color:#555;">'+E(dateStr())+'</div></div>';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr><th style="'+th+'">الطالب</th><td style="'+td+'">'+E(s.name||'')+'</td><th style="'+th+'">ولي الأمر</th><td style="'+td+'">'+E(s.parentName||'—')+(s.parentPhone?' · <span dir="ltr">'+E(s.parentPhone)+'</span>':'')+'</td></tr>'
+    +'<tr><th style="'+th+'">إجمالي الحصص</th><td style="'+td+'">'+all.length+'</td><th style="'+th+'">نسبة الحضور</th><td style="'+td+'">'+pct+'% ('+att+' حضور / '+abs+' غياب)</td></tr></table>';
+  if(!pk.length) h+='<p style="font-size:12px;color:#777;">لا توجد باقات مسجلة بعد.</p>';
+  pk.forEach(p=>{
+    const t=(teachers||[]).find(x=>x.id===p.teacherId);
+    const ss=p.sessions||[], a=ss.filter(x=>x.status==='attended').length, b=ss.filter(x=>x.status==='absent').length, left=ss.length-a-b;
+    h+=h2('📚 '+E(p.subject||'—'));
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;"><tr><th style="'+th+'">المعلم</th><td style="'+td+'">'+E(t?t.name:'—')+'</td><th style="'+th+'">المواعيد الأسبوعية</th><td style="'+td+'">'+((p.schedule||[]).map(sl=>E(DAYS[DAY_KEYS.indexOf(sl.day)]+' '+sl.time+(p.sessionMinutes?' ← '+slotEnd(sl.time,p.sessionMinutes):''))).join('<br>')||'—')+'</td></tr>'
+      +'<tr><th style="'+th+'">مدة الحصة</th><td style="'+td+'">'+(p.sessionMinutes?p.sessionMinutes+' دقيقة':'—')+'</td><th style="'+th+'">التقدم</th><td style="'+td+'">'+a+' منفذة · '+b+' غياب · '+left+' متبقية من '+ss.length+'</td></tr>'
+      +(withFin?'<tr><th style="'+th+'">قيمة الباقة</th><td style="'+td+'">'+E(String(p.amount||'—'))+' '+E(p.currency||'')+'</td><th style="'+th+'">حالة السداد</th><td style="'+td+'">'+(p.paid?'مدفوعة':'غير مدفوعة')+'</td></tr>':'')+'</table>';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:11px;"><tr><th style="'+th+'">#</th><th style="'+th+'">التاريخ</th><th style="'+th+'">الحالة</th></tr>'
+      +ss.map((x,i)=>'<tr><td style="'+td+'">'+(i+1)+'</td><td style="'+td+'">'+E(x.date||'—')+'</td><td style="'+td+'">'+(ST[x.status]||ST.pending)+'</td></tr>').join('')+'</table>';
+  });
+  h+=h2('ملاحظات المعلم / الإدارة')+'<div style="border:1px solid #ccc;min-height:90px;border-radius:6px;"></div>';
+  h+='<div style="margin-top:14px;font-size:10px;color:#777;text-align:center;">صدر من نظام أكاديمية أمجاد</div>';
+  return h;
+}
+function printEduReport(s){
+  const fin=isAdmin()&&(s.packages||[]).some(p=>p.amount)&&confirm('تضمين قيمة الباقات وحالة السداد في التقرير؟\n(موافق = نعم، إلغاء = تقرير تعليمي فقط)');
+  document.getElementById('fullBackupPrint').innerHTML=eduReportHtml(s,fin);
+  document.body.classList.add('printing-backup'); window.print();
+}
+// ===== استيراد من Excel/CSV: معاينة ثم تنفيذ (بدون حذف، مع نسخة احتياطية قبل الكتابة) =====
+const IMP_COLS=[
+ {k:'family_name',l:'اسم الأسرة',a:['الأسرة','اسم الاسرة']},
+ {k:'guardian_name',l:'ولي الأمر',a:['اسم ولي الأمر']},
+ {k:'phone',l:'هاتف ولي الأمر',a:['واتساب','رقم الواتساب','الهاتف','رقم ولي الأمر','هاتف']},
+ {k:'country',l:'الدولة',a:['البلد']},
+ {k:'relation',l:'الصلة',a:[]},
+ {k:'student',l:'الطالب',a:['اسم الطالب']},
+ {k:'stage',l:'المرحلة',a:['المرحلة الدراسية']},
+ {k:'grade',l:'الصف',a:['الصف الدراسي']},
+ {k:'subject',l:'المادة',a:[]},
+ {k:'teacher',l:'المعلم',a:['اسم المعلم']},
+ {k:'sessions',l:'عدد الحصص',a:['الحصص']},
+ {k:'minutes',l:'مدة الحصة',a:['مدة الحصة (د)','مدة الحصة دقيقة']},
+ {k:'amount',l:'السعر',a:['سعر الباقة','قيمة الباقة','المبلغ']},
+ {k:'currency',l:'العملة',a:[]},
+ {k:'amount_egp',l:'المبلغ بالجنيه',a:['السعر بالجنيه']},
+ {k:'teacher_rate',l:'سعر الحصة للمعلم',a:['سعر الحصة (المعلم)']},
+ {k:'teacher_cur',l:'عملة المعلم',a:[]},
+ {k:'schedule',l:'المواعيد',a:['المواعيد الأسبوعية','الموعد']}
+];
+const IMP_DAYS={'الاحد':'sun','الاثنين':'mon','الاتنين':'mon','الثلاثاء':'tue','التلات':'tue','الاربعاء':'wed','الخميس':'thu','الجمعه':'fri','الجمعة':'fri','السبت':'sat'};
+function impDigits(v){ return String(v==null?'':v).replace(/[٠-٩]/g,d=>String(d.charCodeAt(0)-1632)).replace(/[۰-۹]/g,d=>String(d.charCodeAt(0)-1776)); }
+function impNorm(v){ return impDigits(v).replace(/[ً-ٰٟـ]/g,'').replace(/[أإآٱ]/g,'ا').replace(/ى/g,'ي').replace(/ة/g,'ه').replace(/[^\p{L}\p{N}]+/gu,' ').trim().toLowerCase(); }
+function impPk(v){ const d=impDigits(v).replace(/\D/g,''); return d.length>=9?d.slice(-9):d; }
+function impMapHeaders(hdr){
+  const map={}; const lookup={};
+  IMP_COLS.forEach(c=>{ [c.l].concat(c.a).forEach(x=>{ lookup[impNorm(x)]=c.k; }); });
+  hdr.forEach((h,i)=>{ const k=lookup[impNorm(h)]; if(k&&!(k in map)) map[k]=i; });
+  return map;
+}
+function impParseSchedule(txt){
+  const out=[]; const bad=[]; const t=impDigits(txt||'').trim(); if(!t) return {slots:out,bad};
+  t.split(/[;؛\n|،,]+/).map(x=>x.trim()).filter(Boolean).forEach(part=>{
+    const n=impNorm(part); const tm=/(\d{1,2})[:.](\d{2})/.exec(part);
+    const dayWord=Object.keys(IMP_DAYS).find(d=>n.split(' ').some(w=>w===impNorm(d)));
+    if(!dayWord||!tm||Number(tm[1])>23||Number(tm[2])>59){ bad.push(part); return; }
+    const pm=/(^|\s)م($|\s)|مساء|pm/i.test(part)&&Number(tm[1])<12; let h=Number(tm[1])+(pm?12:0);
+    out.push({day:IMP_DAYS[dayWord],time:String(h).padStart(2,'0')+':'+tm[2]});
+  });
+  return {slots:out,bad};
+}
+// ---- قراءة الملفات ----
+function impCsv(text){
+  text=text.replace(/^﻿/,''); const first=text.split(/\r?\n/)[0]||''; const delim=(first.split(';').length>first.split(',').length)?';':(first.split('\t').length>first.split(',').length?'\t':',');
+  const rows=[]; let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){ const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){ cur+='"'; i++; } else q=false; } else cur+=ch; }
+    else if(ch==='"') q=true; else if(ch===delim){ row.push(cur); cur=''; }
+    else if(ch==='\n'||ch==='\r'){ if(ch==='\r'&&text[i+1]==='\n') i++; row.push(cur); rows.push(row); row=[]; cur=''; }
+    else cur+=ch; }
+  if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+  return rows;
+}
+async function impInflate(u8){ const ds=new DecompressionStream('deflate-raw'); const w=ds.writable.getWriter(); w.write(u8); w.close(); return new Uint8Array(await new Response(ds.readable).arrayBuffer()); }
+async function impUnzip(buf){
+  const u8=new Uint8Array(buf), dv=new DataView(buf); let e=-1;
+  for(let i=u8.length-22;i>=Math.max(0,u8.length-65600);i--){ if(dv.getUint32(i,true)===0x06054b50){ e=i; break; } }
+  if(e<0) throw new Error('الملف ليس xlsx صالحًا');
+  const cnt=dv.getUint16(e+10,true); let p=dv.getUint32(e+16,true); const files={}; const dec=new TextDecoder();
+  for(let i=0;i<cnt;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    const method=dv.getUint16(p+10,true), csz=dv.getUint32(p+20,true), nl=dv.getUint16(p+28,true), el=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), off=dv.getUint32(p+42,true);
+    const name=dec.decode(u8.subarray(p+46,p+46+nl)); p+=46+nl+el+cl;
+    const ln=dv.getUint16(off+26,true), le=dv.getUint16(off+28,true), start=off+30+ln+le; const data=u8.subarray(start,start+csz);
+    files[name]={method,data};
+  }
+  const get=async n=>{ const f=files[n]; if(!f) return null; const d=f.method===0?f.data:await impInflate(f.data); return dec.decode(d); };
+  return {names:Object.keys(files),get};
+}
+async function impXlsx(buf){
+  const z=await impUnzip(buf); const P=new DOMParser();
+  const sstXml=await z.get('xl/sharedStrings.xml'); const sst=[];
+  if(sstXml){ const d=P.parseFromString(sstXml,'application/xml'); d.getElementsByTagName('si').length&&[...d.getElementsByTagName('si')].forEach(si=>{ sst.push([...si.getElementsByTagName('t')].map(t=>t.textContent).join('')); }); }
+  const sheetName=z.names.filter(n=>/^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort((a,b)=>Number(a.match(/\d+/)[0])-Number(b.match(/\d+/)[0]))[0];
+  if(!sheetName) throw new Error('لا توجد ورقة بيانات في الملف');
+  const d=P.parseFromString(await z.get(sheetName),'application/xml'); const rows=[];
+  const colIdx=ref=>{ const m=/^([A-Z]+)/.exec(ref); let n=0; for(const ch of m[1]) n=n*26+ch.charCodeAt(0)-64; return n-1; };
+  [...d.getElementsByTagName('row')].forEach(r=>{
+    const arr=[]; [...r.getElementsByTagName('c')].forEach(c=>{
+      const i=colIdx(c.getAttribute('r')||'A1'), t=c.getAttribute('t'); let v='';
+      if(t==='inlineStr') v=[...c.getElementsByTagName('t')].map(x=>x.textContent).join('');
+      else { const ve=c.getElementsByTagName('v')[0]; v=ve?ve.textContent:''; if(t==='s') v=sst[Number(v)]||''; }
+      arr[i]=v; });
+    rows.push(Array.from(arr,x=>x==null?'':x));
+  });
+  return rows;
+}
+async function impReadFile(file){
+  const name=(file.name||'').toLowerCase();
+  if(name.endsWith('.csv')||name.endsWith('.txt')) return impCsv(await file.text());
+  if(name.endsWith('.xlsx')) return impXlsx(await file.arrayBuffer());
+  throw new Error('الصيغة غير مدعومة: استخدم ملف .xlsx أو .csv');
+}
+// ---- التخطيط (بدون أي كتابة) ----
+function impBuildPlan(table){
+  const hdrIdx=table.findIndex(r=>r.some(c=>String(c||'').trim()!==''));
+  if(hdrIdx<0) return {error:'الملف فارغ'};
+  const map=impMapHeaders(table[hdrIdx]);
+  if(!('student' in map)) return {error:'لم أجد عمود «الطالب». تأكد من أسماء الأعمدة (حمّل النموذج للتوضيح).'};
+  const get=(r,k)=>(k in map)?String(r[map[k]]==null?'':r[map[k]]).trim():'';
+  const newFams=[], famByPhone={}, famByName={}, newStu={};
+  const guardians=famState.guardians||[], fams=famState.list||[], kids=famState.kids||[];
+  const items=[]; const counts={rows:0,newFam:0,newStu:0,newPkg:0,dup:0,err:0}; const seenPk={};
+  table.slice(hdrIdx+1).forEach((r,i)=>{
+    if(!r.some(c=>String(c||'').trim()!=='')) return;
+    counts.rows++;
+    const it={line:hdrIdx+2+i,student:get(r,'student'),subject:get(r,'subject'),family:get(r,'family_name'),errors:[],warns:[],act:[]};
+    const phone=impDigits(get(r,'phone')).replace(/\D/g,''), fname=get(r,'family_name');
+    if(!it.student) it.errors.push('اسم الطالب ناقص');
+    // الأسرة
+    let famRef=null;
+    if(phone){ if(phone.length<8) it.errors.push('رقم ولي الأمر غير صالح');
+      else { const pk0=impPk(phone); const g=guardians.find(x=>impPk(x.phone)===pk0||impPk(x.whatsapp)===pk0);
+        if(g) famRef={id:g.family_id,existing:true}; else if(famByPhone[pk0]) famRef=famByPhone[pk0]; } }
+    if(!famRef&&fname){ const nf=impNorm(fname); const f=fams.find(x=>impNorm(x.family_name)===nf);
+      if(f&&!phone) famRef={id:f.id,existing:true}; else if(f&&phone){ it.warns.push('اسم الأسرة موجود برقم مختلف: ستُنشأ أسرة جديدة'); }
+      if(!famRef&&famByName[nf]&&!phone) famRef=famByName[nf]; }
+    if(!famRef&&!it.errors.length){
+      if(!phone) it.errors.push('لا يوجد رقم ولي أمر ولا أسرة معروفة بهذا الاسم');
+      else { const nm=fname||('أسرة '+(get(r,'guardian_name')||it.student)); const country=get(r,'country')||null;
+        const rawPh=impDigits(get(r,'phone')).replace(/[^\d+]/g,''); const phStore=rawPh.startsWith('00')?'+'+rawPh.slice(2):rawPh; famRef={key:'nf'+newFams.length,existing:false,name:nm,country,phone:phStore,guardian:get(r,'guardian_name'),relation:get(r,'relation')||'والد'}; newFams.push(famRef); famByPhone[impPk(phone)]=famRef; famByName[impNorm(nm)]=famRef; counts.newFam++; it.act.push('أسرة جديدة'); }
+    }
+    it.fam=famRef;
+    // الطالب
+    let stu=null;
+    if(famRef&&it.student){ const ns=impNorm(it.student);
+      if(famRef.existing){ const k=kids.find(x=>x.family_id===famRef.id&&impNorm(x.name)===ns); if(k) stu={id:k.id,existing:true}; }
+      if(!stu){ const nk=(famRef.id||famRef.key)+'|'+ns; if(newStu[nk]) stu=newStu[nk]; else { stu={key:nk,existing:false,name:it.student,stage:get(r,'stage')||null,grade:get(r,'grade')||null}; newStu[nk]=stu; counts.newStu++; it.act.push('طالب جديد'); } }
+      if(!stu.existing){ const loose=kids.find(x=>!x.family_id&&impNorm(x.name)===ns); if(loose){ it.errors.push('يوجد طالب بنفس الاسم غير مرتبط بأسرة — اربطه من شاشة الأسر أولًا'); } }
+    }
+    it.stu=stu;
+    // الباقة
+    if(it.subject&&!it.errors.length){
+      const ns=impNorm(it.subject); const total=get(r,'sessions')?Number(impDigits(get(r,'sessions'))):8;
+      if(!(total>0&&Number.isFinite(total))) it.errors.push('عدد الحصص غير صالح');
+      const mins=get(r,'minutes')?Number(impDigits(get(r,'minutes')).replace(/\D/g,'')):null;
+      const amount=get(r,'amount')?Number(impDigits(get(r,'amount')).replace(/,/g,'')):null;
+      if(get(r,'amount')&&!(amount>=0)) it.errors.push('السعر غير صالح');
+      const tr=get(r,'teacher_rate')?Number(impDigits(get(r,'teacher_rate')).replace(/,/g,'')):null;
+      if(get(r,'teacher_rate')&&!(tr>=0)) it.errors.push('سعر المعلم غير صالح');
+      const sc=impParseSchedule(get(r,'schedule')); if(sc.bad.length) it.errors.push('مواعيد غير مفهومة: '+sc.bad.join(' | '));
+      let dupe=false;
+      const sk=stu?((stu.id||stu.key)+'|'+ns):'';
+      if(stu&&stu.existing){ const ls=students.find(x=>x.id===stu.id); dupe=!!(ls&&(ls.packages||[]).some(p=>p.active!==false&&impNorm(p.subject)===ns)); }
+      if(sk&&seenPk[sk]) dupe=true;
+      if(dupe){ it.dupe=true; counts.dup++; it.warns.push('باقة هذه المادة موجودة لنفس الطالب: تُتخطّى'); }
+      else if(!it.errors.length){ it.pkg={subject:it.subject,teacher:get(r,'teacher'),total,minutes:mins&&mins>0?mins:null,amount:amount!=null?String(amount):'',currency:(get(r,'currency')||'EGP').toUpperCase(),amountEGP:get(r,'amount_egp')?String(Number(impDigits(get(r,'amount_egp')).replace(/,/g,''))):'',teacherRate:tr,teacherCur:(get(r,'teacher_cur')||get(r,'currency')||'EGP').toUpperCase(),schedule:sc.slots};
+        if(sk) seenPk[sk]=true; it.act.push('باقة جديدة'); }
+    }
+    if(it.errors.length){ counts.err++; it.act=[]; }
+    it.status=it.errors.length?'خطأ':(it.act.length?'جديد':'مكرر');
+    items.push(it);
+  });
+  const ok=items.filter(i=>i.errors.length===0);
+  counts.newFam=new Set(ok.filter(i=>i.fam&&!i.fam.existing).map(i=>i.fam.key)).size;
+  counts.newStu=new Set(ok.filter(i=>i.stu&&!i.stu.existing).map(i=>i.stu.key)).size;
+  counts.newPkg=ok.filter(i=>i.pkg).length;
+  return {items,newFams,counts,map};
+}
+// ---- التنفيذ ----
+async function impExecute(plan){
+  const okItems=plan.items.filter(i=>i.status==='جديد'); const res={fam:0,stu:0,pkg:0,failed:null};
+  const bk=await supabaseClient.rpc('take_backup',{p_kind:'manual'});
+  if(bk.error) throw new Error('تعذّر أخذ نسخة احتياطية قبل الاستيراد، لم يُنفَّذ شيء: '+(bk.error.message||''));
+  res.backupId=bk.data;
+  const needed=new Set(okItems.filter(i=>i.fam&&!i.fam.existing).map(i=>i.fam.key));
+  for(const f of plan.newFams){ if(!needed.has(f.key)) continue;
+    const fr=await supabaseClient.from('families').insert({family_name:f.name,country:f.country,timezone:(typeof FAM_TZ!=='undefined'&&FAM_TZ[f.country])||'Africa/Cairo'}).select().single();
+    if(fr.error) throw new Error('تعذّر إنشاء الأسرة «'+f.name+'»: '+(fr.error.message||''));
+    const gr=await supabaseClient.from('guardians').insert({family_id:fr.data.id,full_name:f.guardian||('ولي أمر '+f.name),relation:f.relation||'والد',phone:f.phone,whatsapp:f.phone,is_primary:true});
+    if(gr.error) throw new Error('تعذّر حفظ ولي أمر «'+f.name+'»: '+(gr.error.message||''));
+    f.id=fr.data.id; res.fam++; }
+  const stuMade={}; const newPkgIds=[]; let teachersChanged=false;
+  for(const it of okItems){
+    const famId=it.fam.existing?it.fam.id:it.fam.id; if(!famId) continue;
+    let st; if(it.stu.existing) st=students.find(x=>x.id===it.stu.id);
+    else { st=stuMade[it.stu.key]; if(!st){ const guardianPhone=it.fam.existing?((famState.guardians.find(g=>g.family_id===famId&&g.is_primary)||famState.guardians.find(g=>g.family_id===famId)||{}).phone||''):it.fam.phone;
+        st={id:uid(),name:it.stu.name,subject:'',schedule:[],notifyBefore:'10',parentName:it.fam.relation||'',parentPhone:guardianPhone||'',status:'new',permanentNotes:'',customFields:[],packages:[],photo:'',createdAt:new Date().toISOString()};
+        students.push(st); stuMade[it.stu.key]=st; queueStudentMeta(st.id,{family_id:famId,stage:it.stu.stage,grade:it.stu.grade}); res.stu++; } }
+    if(!st||!it.pkg) continue; const p=it.pkg;
+    let teacherId=''; if(p.teacher){ const nt=impNorm(p.teacher); let t=teachers.find(x=>impNorm(x.name)===nt); if(!t){ t={id:uid(),name:p.teacher,phone:'',subjects:p.subject,salary:'',salaryCurrency:'EGP',notes:''}; teachers.push(t); teachersChanged=true; } teacherId=t.id; }
+    const pkg={id:uid(),subject:p.subject,teacherId,whatsappGroup:'',totalSessions:p.total,sessions:Array.from({length:p.total},()=>({date:'',status:'pending'})),amount:p.amount,currency:p.currency,amountEGP:p.currency==='EGP'?'':p.amountEGP,paid:false,receipt:'',active:true,createdAt:dateStr(),schedule:p.schedule,sessionMinutes:p.minutes};
+    st.packages.push(pkg);
+    const have=new Set((st.schedule||[]).map(schedKey)); st.schedule=(st.schedule||[]).slice(); p.schedule.forEach(sl=>{ if(!have.has(schedKey(sl))){ st.schedule.push(sl); have.add(schedKey(sl)); } });
+    const o={}; if(p.teacherRate!=null){ o.teacher_rate_per_session=p.teacherRate; o.teacher_rate_currency=p.teacherCur; o.rates_frozen_at=new Date().toISOString(); }
+    const pa=Number(p.amount); if(pa>0&&p.total>0) { o.parent_rate_per_session=Math.round(pa/p.total*100)/100; o.rates_frozen_at=o.rates_frozen_at||new Date().toISOString(); }
+    if(Object.keys(o).length) queuePkgRates(pkg.id,o);
+    newPkgIds.push(pkg.id); res.pkg++;
+  }
+  if(teachersChanged) saveTeachers();
+  saveStudents(); newPkgIds.forEach(markFinDirty);
+  try{ await mirrorDirty(); await flushStudentMeta(); await flushPkgRates(); }catch(e){ res.failed='تم الحفظ محليًا، وتعذّرت المزامنة الكاملة: '+(e.message||e); }
+  try{ await famLoad(); }catch(e){}
+  render(); return res;
+}
+// ---- الواجهة ----
+function impTemplate(){
+  const H=IMP_COLS.map(c=>({v:c.l,s:1}));
+  const ex=['أسرة أحمد','أحمد علي','+966500000001','السعودية','والد','سلمى','ابتدائي','الثالث','رياضيات','المعلمة نور',8,45,800,'SAR',11200,40,'SAR','الاثنين 16:00; الأربعاء 17:30'];
+  const note=[['ملاحظات: صف واحد لكل (طالب × مادة). كرّر بيانات الأسرة في كل صف لنفس الأسرة. المواعيد بتوقيت القاهرة بصيغة «اليوم HH:MM» وتُفصل بـ ؛ . الطالب والأسرة (برقم الهاتف) إن وُجدا لا يُكرَّران.']];
+  const blob=buildXlsx([{name:'الاستيراد',rows:[H,ex],widths:IMP_COLS.map(c=>Math.max(14,c.l.length+4))},{name:'تعليمات',rows:note,widths:[110]}]);
+  downloadBlob(blob,'amjad-import-template.xlsx');
+}
+async function openImportModal(){
+  if(!isAdmin()||!supabaseClient){ toast('الاستيراد للمدير وبالاتصال بالسحابة فقط'); return; }
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  try{ await famLoad(); }catch(e){ toast('تعذّر تحميل الأسر: '+(e.message||'')); return; }
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">📥 استيراد من Excel</div><button class="close-btn" id="closeModal">✕</button></div>
+    <div class="package-sub" style="margin-bottom:8px;">ملف .xlsx أو .csv، صف لكل (طالب × مادة). تظهر معاينة كاملة قبل أي حفظ، وتؤخذ نسخة احتياطية تلقائيًا، ولا يُحذف أو يُعدَّل شيء موجود.</div>
+    <button class="mini-btn" id="impTpl">⬇️ تحميل النموذج</button>
+    <input type="file" id="impFile" accept=".xlsx,.csv,.txt" style="margin:10px 0;display:block;">
+    <div id="impOut"></div></div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  document.getElementById('impTpl').addEventListener('click',impTemplate);
+  document.getElementById('impFile').addEventListener('change',async e=>{
+    const out=document.getElementById('impOut'); const f=e.target.files[0]; if(!f) return;
+    out.innerHTML='<div class="empty">جارٍ قراءة الملف…</div>';
+    let plan; try{ plan=impBuildPlan(await impReadFile(f)); }catch(err){ out.innerHTML='<div class="empty" style="color:#B8391A;">'+escapeHtml(err.message||String(err))+'</div>'; return; }
+    if(plan.error){ out.innerHTML='<div class="empty" style="color:#B8391A;">'+escapeHtml(plan.error)+'</div>'; return; }
+    const C=plan.counts, col={'جديد':'#1E7A46','مكرر':'#7A7A7A','خطأ':'#B8391A'};
+    out.innerHTML=`<div class="fin-box" style="margin-top:0;"><div class="fin-sum"><span>صفوف: <b>${C.rows}</b></span><span>أسر جديدة: <b>${C.newFam}</b></span><span>طلاب جدد: <b>${C.newStu}</b></span><span>باقات جديدة: <b>${C.newPkg}</b></span><span>مكرر: <b>${C.dup}</b></span><span style="color:#B8391A;">أخطاء: <b>${C.err}</b></span></div></div>
+      <div style="max-height:46vh;overflow:auto;border:1px solid #E7DFC7;border-radius:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#F6F0DE;"><th style="padding:6px;">سطر</th><th>الطالب</th><th>المادة</th><th>النتيجة</th></tr></thead><tbody>${plan.items.map(it=>`<tr style="border-top:1px solid #F0EAD6;"><td style="padding:6px;">${it.line}</td><td>${escapeHtml(it.student)}</td><td>${escapeHtml(it.subject)}</td><td style="color:${col[it.status]};font-weight:700;">${it.status}${it.act.length?' — '+escapeHtml(it.act.join('، ')):''}${it.errors.concat(it.warns).map(m=>'<div style="font-weight:400;font-size:11px;">'+escapeHtml(m)+'</div>').join('')}</td></tr>`).join('')}</tbody></table></div>
+      ${C.err?'<div style="color:#B8391A;font-size:12px;margin:6px 0;">الصفوف ذات الأخطاء ستُتخطّى. صحّحها في الملف وأعد رفعه (الصفوف السليمة لن تتكرر).</div>':''}
+      <button class="submit-btn" id="impGo" ${plan.items.some(i=>i.status==='جديد')?'':'disabled'}>تنفيذ الاستيراد (${plan.items.filter(i=>i.status==='جديد').length} صف)</button>`;
+    document.getElementById('impGo').addEventListener('click',async ev=>{
+      if(!confirm('سيتم أخذ نسخة احتياطية ثم إنشاء البيانات الجديدة فقط. متابعة؟')) return;
+      ev.target.disabled=true; ev.target.textContent='جارٍ الاستيراد…';
+      try{ const r=await impExecute(plan); out.innerHTML=`<div class="fin-box" style="margin-top:0;">✅ تم الاستيراد: <b>${r.fam}</b> أسرة، <b>${r.stu}</b> طالب، <b>${r.pkg}</b> باقة.<br>نسخة احتياطية رقم <b>${escapeHtml(String(r.backupId))}</b> أُخذت قبل التنفيذ.${r.failed?'<br><span style="color:#B8391A;">'+escapeHtml(r.failed)+'</span>':''}</div><button class="mini-btn" onclick="closeForm()">إغلاق</button>`; }
+      catch(err){ out.innerHTML='<div class="fin-box" style="color:#B8391A;">⚠️ '+escapeHtml(err.message||String(err))+'</div><div class="package-sub">راجع شاشة الأسر؛ ما حُفظ قبل الخطأ يبقى كما هو ولن يتكرر عند إعادة الرفع.</div>'; }
+    });
+  });
 }
 // ===== المواعيد الأسبوعية: وقت النهاية، تعارض المعلم/الطالب، توقيت الأسرة =====
 const ACADEMY_TZ='Africa/Cairo', DEFAULT_LESSON_MIN=60;
@@ -1800,6 +2071,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   if(root.innerHTML){root.innerHTML='';return;}
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
     ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="familiesBtn">👪 الأسر وأولياء الأمور</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importXlsBtn">📥 استيراد من Excel</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="teachersFinBtn">👨‍🏫 كشف المعلمين والصرف</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
@@ -1813,6 +2085,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   </div>`;
   if(isAdmin()){
   document.getElementById('familiesBtn').addEventListener('click',openFamiliesModal);
+  { const ib=document.getElementById('importXlsBtn'); if(ib) ib.addEventListener('click',openImportModal); }
   document.getElementById('teachersFinBtn').addEventListener('click',openTeacherStatements);
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
   document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
