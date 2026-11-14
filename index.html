@@ -859,6 +859,25 @@ function renderProfile(c){
 
 const SUBJECT_SUGGEST=['لغة عربية','لغة إنجليزية','تأسيس إنجليزي','رياضيات','قرآن كريم','عربي وقرآن'];
 function schedKey(sl){ return sl.day+'|'+sl.time; }
+// ===== المواعيد الأسبوعية: وقت النهاية، تعارض المعلم/الطالب، توقيت الأسرة =====
+const ACADEMY_TZ='Africa/Cairo', DEFAULT_LESSON_MIN=60;
+function t2m(t){ const m=/^(\d{1,2}):(\d{2})/.exec(t||''); return m?Number(m[1])*60+Number(m[2]):null; }
+function m2t(m){ m=((m%1440)+1440)%1440; return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'); }
+function slotEnd(time,mins){ const a=t2m(time); return a==null?'':m2t(a+(Number(mins)||DEFAULT_LESSON_MIN)); }
+function tzOffsetMin(tz,date){ date=date||new Date(); try{ const f=new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric'}); const p={}; f.formatToParts(date).forEach(x=>{p[x.type]=x.value;}); return Math.round((Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute,p.second)-date.getTime())/60000); }catch(e){ return null; } }
+function toFamilyTime(time,tz){ const a=t2m(time); if(a==null||!tz||tz===ACADEMY_TZ) return null; const o1=tzOffsetMin(tz), o0=tzOffsetMin(ACADEMY_TZ); if(o1==null||o0==null) return null; const v=a+(o1-o0); return m2t(v)+(v>=1440?' (+1 يوم)':v<0?' (-1 يوم)':''); }
+function slotsOverlap(a,am,b,bm){ if(a.day!==b.day) return false; const s1=t2m(a.time), s2=t2m(b.time); if(s1==null||s2==null) return false; const e1=s1+(Number(am)||DEFAULT_LESSON_MIN), e2=s2+(Number(bm)||DEFAULT_LESSON_MIN); return s1<e2&&s2<e1; }
+function findScheduleConflicts(slots,mins,teacherId,studentId,excludePkgId){
+  const out=[];
+  (students||[]).forEach(st=>{ (st.packages||[]).forEach(p=>{
+    if(p.id===excludePkgId||p.active===false) return;
+    const sameTeacher=teacherId&&p.teacherId===teacherId, sameStudent=st.id===studentId;
+    if(!sameTeacher&&!sameStudent) return;
+    (p.schedule||[]).forEach(o=>{ slots.forEach(n=>{ if(slotsOverlap(n,mins,o,p.sessionMinutes)) out.push({kind:sameTeacher?'teacher':'student',student:st.name,subject:p.subject,day:o.day,time:o.time,end:slotEnd(o.time,p.sessionMinutes)}); }); });
+  }); });
+  return out;
+}
+function describeConflicts(cs){ return cs.map(c=>(c.kind==='teacher'?'المعلم عنده حصة: ':'الطالب عنده حصة: ')+c.student+' — '+c.subject+' ('+DAYS[DAY_KEYS.indexOf(c.day)]+' '+c.time+'–'+c.end+')').join('\n'); }
 function openPackageForm(studentId, pkgId, prefill, opts){
   opts=opts||{};
   const s=students.find(x=>x.id===studentId);
@@ -880,6 +899,7 @@ function openPackageForm(studentId, pkgId, prefill, opts){
         <label class="field-label">مواعيد الحصص الأسبوعية لهذه المادة</label>
         <div id="pfSchedRows"></div>
         <button type="button" class="add-row-btn" id="pfAddSched">+ إضافة موعد تاني</button>
+        <div id="pfSchedInfo" style="font-size:12px;line-height:1.7;margin:4px 0 8px;"></div>
         <label class="field-label">مدة الحصة (دقيقة)</label>
         <select class="field-input" id="pf_minutes"><option value="">غير محددة</option>${[30,40,45,60,90].map(m=>`<option value="${m}" ${Number(form.sessionMinutes)===m?'selected':''}>${m} دقيقة</option>`).join('')}</select>
         <label class="field-label">المعلم</label>
@@ -917,7 +937,24 @@ function openPackageForm(studentId, pkgId, prefill, opts){
     rowsBox.appendChild(row);
   }
   sched0.forEach(addRow);
-  document.getElementById('pfAddSched').addEventListener('click',()=>addRow({day:todayKey(),time:'16:00'}));
+  document.getElementById('pfAddSched').addEventListener('click',()=>{ addRow({day:todayKey(),time:'16:00'}); schedInfo(); });
+  const kidRow=(famState.kids||[]).find(k=>k.id===studentId);
+  const famRow=(famState.list||[]).find(f=>f.id===(opts.familyId||(kidRow&&kidRow.family_id)));
+  const famTz=famRow&&famRow.timezone;
+  const readSlots=()=>[...rowsBox.querySelectorAll('.schedule-row')].map(r=>({day:r.querySelector('.sched-day').value,time:r.querySelector('.sched-time').value})).filter(sl=>sl.time);
+  function schedInfo(){
+    const box=document.getElementById('pfSchedInfo'); if(!box) return;
+    const mins=document.getElementById('pf_minutes').value, slots=readSlots();
+    const tid=document.getElementById('pf_teacher').value;
+    let h=slots.map(sl=>{ const ft=toFamilyTime(sl.time,famTz); return '🕒 '+DAYS[DAY_KEYS.indexOf(sl.day)]+' '+sl.time+' ← '+slotEnd(sl.time,mins)+(ft?' · عند الأسرة '+ft:''); }).map(escapeHtml).join('<br>');
+    if(!mins) h+='<br><span style="color:#888">مدة الحصة غير محددة: تُحسب '+DEFAULT_LESSON_MIN+' دقيقة لفحص التعارض</span>';
+    const cs=findScheduleConflicts(slots,mins,tid,studentId,pkgId);
+    if(cs.length) h+='<div style="color:#c0392b;font-weight:700;margin-top:4px;">⚠️ تعارض مواعيد:<br>'+escapeHtml(describeConflicts(cs)).replace(/\n/g,'<br>')+'</div>';
+    box.innerHTML=h;
+  }
+  rowsBox.addEventListener('input',schedInfo); rowsBox.addEventListener('change',schedInfo); rowsBox.addEventListener('click',()=>setTimeout(schedInfo,0));
+  document.getElementById('pf_minutes').addEventListener('change',schedInfo); document.getElementById('pf_teacher').addEventListener('change',schedInfo);
+  schedInfo();
   document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
   document.getElementById('closeModal').addEventListener('click',closeForm);
   if(adm){
@@ -938,6 +975,7 @@ function openPackageForm(studentId, pkgId, prefill, opts){
     const schedule=[...rowsBox.querySelectorAll('.schedule-row')].map(r=>({day:r.querySelector('.sched-day').value,time:r.querySelector('.sched-time').value})).filter(sl=>sl.time);
     if(!subject){ toast('اكتب المادة'); return; }
     if(!schedule.length){ toast('أضف موعدًا واحدًا على الأقل'); return; }
+    { const cs=findScheduleConflicts(schedule,minutes,teacherId,studentId,pkgId); if(cs.length&&!confirm('⚠️ في تعارض مواعيد:\n'+describeConflicts(cs)+'\n\nتحفظ الباقة رغم التعارض؟')) return; }
     if(newTeacherName){
       const nt={id:uid(),name:newTeacherName,phone:'',subjects:subject,salary:'',salaryCurrency:'EGP',notes:''};
       teachers.push(nt); saveTeachers(); teacherId=nt.id;
