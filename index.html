@@ -258,7 +258,7 @@ async function flushDeletes(table,soft){
 async function syncStudentsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
-    if(students.length){ const {error}=await supabaseClient.from('students').upsert(students,{onConflict:'id'}); if(error)throw error; }
+    if(students.length){ const {error}=await supabaseClient.from('students').upsert(students.map(s=>{ const c=Object.assign({},s); delete c.family_id; return c; }),{onConflict:'id'}); if(error)throw error; } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
     await flushDeletes('students',true);
     cloudOnline=true;
   }catch(e){ cloudOnline=false; setSyncErr('sync students',e); console.error('sync students failed, remote untouched',e); }
@@ -388,8 +388,9 @@ const MORE_TABS = [
   {key:'week', label:'📆 الأسبوع'},
   {key:'stats', label:'📊 إحصائيات'},
   {key:'supervisors', label:'🛡️ المشرفين'},
+  {key:'audit', label:'📒 تقرير المحاسب'},
 ];
-const ADMIN_ONLY_TABS = ['stats','supervisors'];
+const ADMIN_ONLY_TABS = ['stats','supervisors','audit'];
 document.getElementById('moreTabBtn').addEventListener('click',(e)=>{
   e.stopPropagation();
   const root = document.getElementById('moreMenuRoot');
@@ -424,7 +425,7 @@ function render(){
   }
   tabsBar.style.display='flex';
   applyRoleUI();
-  fab.style.display = (currentTab==='stats'||currentTab==='week'||currentTab==='supervisors') ? 'none' : 'flex';
+  fab.style.display = (currentTab==='stats'||currentTab==='week'||currentTab==='supervisors'||currentTab==='audit') ? 'none' : 'flex';
   const pendingCount = bookings.filter(b=>b.status==='pending').length;
   const bkBtn = document.getElementById('bookingsTabBtn');
   if(bkBtn) bkBtn.innerHTML = `📅 الحجوزات${pendingCount>0?` <span style="background:#B8391A;color:#fff;border-radius:10px;padding:1px 6px;font-size:10.5px;">${pendingCount}</span>`:''}`;
@@ -435,6 +436,7 @@ function render(){
   else if(currentTab==='bookings') renderBookings(c);
   else if(currentTab==='stats') renderStats(c);
   else if(currentTab==='supervisors') renderSupervisors(c);
+  else if(currentTab==='audit') renderAudit(c);
   else renderWeek(c);
 }
 
@@ -1647,17 +1649,20 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   const root=document.getElementById('settingsMenuRoot');
   if(root.innerHTML){root.innerHTML='';return;}
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
-    ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
+    ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="familiesBtn">👪 الأسر وأولياء الأمور</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="invoiceInfoBtn">🧾 بيانات الأكاديمية على الإيصال</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="printBackupBtn">🖨️ طباعة نسخة كاملة (PDF)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="backupsBtn">💾 النسخ الاحتياطية والاسترجاع</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportAuditBtn">📒 تقرير المحاسب والمراجع (Excel)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportXlsxBtn">📗 تقرير مالي Excel (.xlsx)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportFinPdfBtn">📄 تقرير مالي PDF (طباعة)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportCsvBtn">📊 تصدير CSV للمحاسب</div>`:''}
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;color:#B8391A;" id="lockAppBtn">🔒 قفل البرنامج الآن</div>
   </div>`;
   if(isAdmin()){
+  document.getElementById('familiesBtn').addEventListener('click',openFamiliesModal);
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
   document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('importFile').click());
   document.getElementById('invoiceInfoBtn').addEventListener('click',()=>{
@@ -1671,6 +1676,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   document.getElementById('printBackupBtn').addEventListener('click',printFullBackup);
   document.getElementById('exportCsvBtn').addEventListener('click',exportCsv);
   document.getElementById('backupsBtn').addEventListener('click',openBackupsModal);
+  document.getElementById('exportAuditBtn').addEventListener('click',exportAuditXlsx);
   document.getElementById('exportXlsxBtn').addEventListener('click',exportFinanceXlsx);
   document.getElementById('exportFinPdfBtn').addEventListener('click',exportFinancePdf);
   }
@@ -1718,23 +1724,38 @@ function buildXlsx(sheets){
   files.push({name:'_rels/.rels',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')});
   files.push({name:'xl/workbook.xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((sh,i)=>'<sheet name="'+_xe(sh.name.replace(/[\\\/\?\*\[\]:]/g,' ').slice(0,31))+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join('')+'</sheets></workbook>')});
   files.push({name:'xl/_rels/workbook.xml.rels',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((_,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join('')+'<Relationship Id="rId'+(sheets.length+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')});
-  files.push({name:'xl/styles.xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0EADA"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs></styleSheet>')});
+  files.push({name:'xl/styles.xml',data:u('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="16"/><name val="Calibri"/></font></fonts><fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF0EADA"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFBE3E0"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF3D6"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFE3F2E9"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="13">'
+    +'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+    +'<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>'
+    +'<xf numFmtId="0" fontId="0" fillId="3" borderId="0" xfId="0" applyFill="1"/>'
+    +'<xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1"/>'
+    +'<xf numFmtId="0" fontId="0" fillId="5" borderId="0" xfId="0" applyFill="1"/>'
+    +'<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    +'<xf numFmtId="9" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'
+    +'<xf numFmtId="3" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>'
+    +'<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+    +'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
+    +'<xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
+    +'<xf numFmtId="0" fontId="1" fillId="4" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
+    +'<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>'
+    +'</cellXfs></styleSheet>')});
   sheets.forEach((sh,i)=>{
     const ncols=Math.max(1,...sh.rows.map(r=>r.length));
-    let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0"/></sheetViews><cols>';
+    let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView rightToLeft="1" workbookViewId="0">'+(sh.freeze?'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>':'')+'</sheetView></sheetViews><cols>';
     for(let c=0;c<ncols;c++) x+='<col min="'+(c+1)+'" max="'+(c+1)+'" width="'+(sh.widths&&sh.widths[c]||20)+'" customWidth="1"/>';
     x+='</cols><sheetData>';
     sh.rows.forEach((row,r)=>{
       x+='<row r="'+(r+1)+'">';
       row.forEach((v,c)=>{
+        let cs=null; if(v&&typeof v==='object'){ cs=v.s; v=v.v; }
         if(v===null||v===undefined||v==='') return;
-        const ref=_col(c)+(r+1), st=(r===0&&!sh.noHeader)?' s="1"':'';
+        const ref=_col(c)+(r+1), st=cs!=null?(' s="'+cs+'"'):((r===0&&!sh.noHeader)?' s="1"':'');
         if(typeof v==='number'&&isFinite(v)) x+='<c r="'+ref+'"'+st+'><v>'+v+'</v></c>';
         else x+='<c r="'+ref+'" t="inlineStr"'+st+'><is><t xml:space="preserve">'+_xe(v)+'</t></is></c>';
       });
       x+='</row>';
     });
-    x+='</sheetData></worksheet>';
+    x+='</sheetData>'+(sh.filter&&sh.rows.length>1?'<autoFilter ref="A1:'+_col(ncols-1)+sh.rows.length+'"/>':'')+'</worksheet>';
     files.push({name:'xl/worksheets/sheet'+(i+1)+'.xml',data:u(x)});
   });
   return zipStore(files);
@@ -1848,6 +1869,147 @@ async function refreshBackupsList(note){
     try{ await loadFromCloud(); }catch(e){}
     await refreshBackupsList('✅ تم استرجاع: '+escapeHtml(bkSummary(r.rows_missing_or_restored))+' (أُخذت نسخة أمان قبل الاسترجاع)');
   }));
+}
+
+// ---------- FAMILIES (admin only) ----------
+const FAM_TZ={'السعودية':'Asia/Riyadh','الإمارات':'Asia/Dubai','قطر':'Asia/Qatar','الكويت':'Asia/Kuwait','عُمان':'Asia/Muscat','البحرين':'Asia/Bahrain','مصر':'Africa/Cairo'};
+const famState={list:[],guardians:[],kids:[],q:'',openId:null};
+async function famLoad(){
+  const [f,g,s]=await Promise.all([
+    supabaseClient.from('families').select('*').is('deleted_at',null).order('family_code'),
+    supabaseClient.from('guardians').select('*').is('deleted_at',null),
+    supabaseClient.from('students').select('id,name,family_id').is('deleted_at',null)
+  ]);
+  const err=f.error||g.error||s.error; if(err) throw err;
+  famState.list=f.data||[]; famState.guardians=g.data||[]; famState.kids=s.data||[];
+}
+function famKidsOf(id){ return famState.kids.filter(k=>k.family_id===id); }
+function famGuardiansOf(id){ return famState.guardians.filter(g=>g.family_id===id); }
+function famPrimary(id){ const gs=famGuardiansOf(id); return gs.find(g=>g.is_primary)||gs[0]||null; }
+async function openFamiliesModal(){
+  if(!isAdmin()||!supabaseClient) return;
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const root=document.getElementById('modalRoot');
+  root.innerHTML='<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">👪 الأسر وأولياء الأمور</div><button class="close-btn" id="closeModal">✕</button></div><div id="famBody" class="package-sub">جارٍ التحميل…</div></div></div>';
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  famState.openId=null; famState.q='';
+  await famRefresh();
+}
+async function famRefresh(note){
+  const body=document.getElementById('famBody'); if(!body) return;
+  try{ await famLoad(); }catch(e){ body.innerHTML='تعذّر التحميل: '+escapeHtml(e.message||String(e)); return; }
+  if(famState.openId && famState.list.find(f=>f.id===famState.openId)) famRenderDetail(body,note);
+  else { famState.openId=null; famRenderList(body,note); }
+}
+function famListHtml(){
+  const q=famState.q.trim().toLowerCase();
+  const rows=famState.list.filter(f=>{
+    if(!q) return true;
+    const kids=famKidsOf(f.id).map(k=>k.name).join(' ');
+    const gs=famGuardiansOf(f.id).map(g=>(g.full_name||'')+' '+(g.phone||'')).join(' ');
+    return ((f.family_name||'')+' '+(f.family_code||'')+' '+kids+' '+gs).toLowerCase().includes(q);
+  });
+  return rows.map(f=>{
+    const kids=famKidsOf(f.id), g=famPrimary(f.id);
+    return `<div class="fin-box" data-fam="${escapeHtml(f.id)}" style="cursor:pointer;">
+      <div class="fin-sum"><b>${escapeHtml(f.family_name||'')}</b><span>${escapeHtml(f.family_code||'')}</span><span>${escapeHtml(f.country||'')}</span></div>
+      <div style="font-size:11.5px;color:var(--muted);">👦 ${kids.length} ${kids.length?'· '+escapeHtml(kids.map(k=>k.name).join('، ')):''}</div>
+      ${g?`<div style="font-size:11.5px;color:var(--muted);">👤 ${escapeHtml(g.relation||'ولي الأمر')} ${g.phone?'· <span dir="ltr">'+escapeHtml(g.phone)+'</span>':''}</div>`:''}
+    </div>`;
+  }).join('')||'<div class="empty" style="padding:14px;">لا توجد نتائج</div>';
+}
+function famRenderList(body,note){
+  const unlinked=famState.kids.filter(k=>!k.family_id).length;
+  body.innerHTML=`
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">${famState.list.length} أسرة · ${famState.kids.length-unlinked} طالب مربوط · <b>${unlinked}</b> طالب بدون أسرة</div>
+    ${note?`<div class="fin-box">${note}</div>`:''}
+    <input class="search-input" id="famSearch" placeholder="بحث باسم الأسرة أو الطالب أو الرقم" value="${escapeHtml(famState.q)}">
+    <button class="submit-btn" id="famNew" style="margin-top:0;margin-bottom:8px;">➕ أسرة جديدة</button>
+    <div id="famList">${famListHtml()}</div>`;
+  const wire=()=>document.querySelectorAll('#famList [data-fam]').forEach(el=>el.addEventListener('click',()=>{ famState.openId=el.dataset.fam; famRender(); }));
+  wire();
+  document.getElementById('famSearch').addEventListener('input',e=>{ famState.q=e.target.value; document.getElementById('famList').innerHTML=famListHtml(); wire(); });
+  document.getElementById('famNew').addEventListener('click',async e=>{
+    const name=prompt('اسم الأسرة'); if(!name||!name.trim()) return;
+    e.target.disabled=true;
+    const {data,error}=await supabaseClient.from('families').insert({family_name:name.trim()}).select().single();
+    if(error){ e.target.disabled=false; toast('تعذّر الإنشاء: '+(error.message||'')); return; }
+    famState.openId=data.id; await famRefresh('✅ تم إنشاء الأسرة '+escapeHtml(data.family_code||''));
+  });
+}
+function famRender(note){ famRenderDetail(document.getElementById('famBody'),note); }
+function famRenderDetail(body,note){
+  const f=famState.list.find(x=>x.id===famState.openId); if(!f){ famState.openId=null; famRenderList(body); return; }
+  const gs=famGuardiansOf(f.id), kids=famKidsOf(f.id), free=famState.kids.filter(k=>!k.family_id);
+  const countries=Object.keys(FAM_TZ); if(f.country&&!countries.includes(f.country)) countries.push(f.country);
+  const tzs=Array.from(new Set(Object.values(FAM_TZ))); if(f.timezone&&!tzs.includes(f.timezone)) tzs.push(f.timezone);
+  body.innerHTML=`
+    <button class="mini-btn" id="famBack">← كل الأسر</button>
+    ${note?`<div class="fin-box" style="margin-top:8px;">${note}</div>`:''}
+    <div class="fin-box" style="margin-top:8px;">
+      <div class="fin-sum"><b>${escapeHtml(f.family_code||'')}</b></div>
+      <label class="field-label" style="margin-top:0;">اسم الأسرة</label>
+      <input class="field-input" id="fam_name" value="${escapeHtml(f.family_name||'')}">
+      <label class="field-label">الدولة</label>
+      <select class="field-input" id="fam_country"><option value="">—</option>${countries.map(c=>`<option ${f.country===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}</select>
+      <label class="field-label">المنطقة الزمنية</label>
+      <select class="field-input" id="fam_tz">${tzs.map(t=>`<option ${f.timezone===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}</select>
+      <label class="field-label">ملاحظات</label>
+      <textarea class="field-input" id="fam_notes" style="min-height:50px;">${escapeHtml(f.notes||'')}</textarea>
+      <button class="submit-btn" id="famSave" style="margin-top:10px;">حفظ بيانات الأسرة</button>
+    </div>
+    <div style="font-weight:800;margin:12px 0 4px;">👤 أولياء الأمور</div>
+    ${gs.map(g=>`<div class="fin-box" data-g="${escapeHtml(g.id)}">
+      <label class="field-label" style="margin-top:0;">الاسم</label><input class="field-input g_name" value="${escapeHtml(g.full_name||'')}">
+      <label class="field-label">الصلة (والد / والدة …)</label><input class="field-input g_rel" value="${escapeHtml(g.relation||'')}">
+      <label class="field-label">الهاتف</label><input class="field-input g_phone" dir="ltr" value="${escapeHtml(g.phone||'')}">
+      <label class="field-label">واتساب</label><input class="field-input g_wa" dir="ltr" value="${escapeHtml(g.whatsapp||'')}">
+      <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;"><button class="mini-btn filled g_save">حفظ</button>${g.is_primary?'<span class="package-sub">⭐ أساسي</span>':'<button class="mini-btn g_primary">⭐ اجعله أساسيًا</button>'}</div>
+    </div>`).join('')||'<div class="package-sub">لا يوجد ولي أمر</div>'}
+    <button class="mini-btn" id="famAddG" style="margin-top:6px;">➕ إضافة ولي أمر</button>
+    <div style="font-weight:800;margin:14px 0 4px;">👦 الأبناء (${kids.length})</div>
+    ${kids.map(k=>`<div class="fin-box" style="display:flex;justify-content:space-between;align-items:center;"><span>${escapeHtml(k.name||'')}</span><button class="mini-btn k_unlink" data-k="${escapeHtml(k.id)}" style="color:#B8391A;">فك الربط</button></div>`).join('')||'<div class="package-sub">لا يوجد أبناء مربوطون</div>'}
+    <label class="field-label">ربط طالب بدون أسرة (${free.length})</label>
+    <select class="field-input" id="famFree"><option value="">— اختر طالبًا —</option>${free.sort((a,b)=>(a.name||'').localeCompare(b.name||'','ar')).map(k=>`<option value="${escapeHtml(k.id)}">${escapeHtml(k.name||'')}</option>`).join('')}</select>
+    <button class="mini-btn filled" id="famLink" style="margin-top:6px;">🔗 ربط بهذه الأسرة</button>`;
+  const fail=(e)=>toast('تعذّر الحفظ: '+((e&&e.message)||''));
+  document.getElementById('famBack').addEventListener('click',()=>{ famState.openId=null; famRefresh(); });
+  document.getElementById('famSave').addEventListener('click',async()=>{
+    const name=document.getElementById('fam_name').value.trim(); if(!name){ toast('اكتب اسم الأسرة'); return; }
+    const {error}=await supabaseClient.from('families').update({family_name:name,country:document.getElementById('fam_country').value||null,timezone:document.getElementById('fam_tz').value||null,notes:document.getElementById('fam_notes').value.trim()||null}).eq('id',f.id);
+    if(error) return fail(error); await famRefresh('✅ تم حفظ بيانات الأسرة');
+  });
+  body.querySelectorAll('[data-g]').forEach(box=>{
+    const gid=box.dataset.g;
+    box.querySelector('.g_save').addEventListener('click',async()=>{
+      const full=box.querySelector('.g_name').value.trim(); if(!full){ toast('اكتب اسم ولي الأمر'); return; }
+      const {error}=await supabaseClient.from('guardians').update({full_name:full,relation:box.querySelector('.g_rel').value.trim()||null,phone:box.querySelector('.g_phone').value.trim()||null,whatsapp:box.querySelector('.g_wa').value.trim()||null}).eq('id',gid);
+      if(error) return fail(error); await famRefresh('✅ تم حفظ ولي الأمر');
+    });
+    const pr=box.querySelector('.g_primary');
+    if(pr) pr.addEventListener('click',async()=>{
+      let r=await supabaseClient.from('guardians').update({is_primary:false}).eq('family_id',f.id); if(r.error) return fail(r.error);
+      r=await supabaseClient.from('guardians').update({is_primary:true}).eq('id',gid); if(r.error) return fail(r.error);
+      await famRefresh('✅ تم تعيين ولي الأمر الأساسي');
+    });
+  });
+  document.getElementById('famAddG').addEventListener('click',async()=>{
+    const full=prompt('اسم ولي الأمر'); if(!full||!full.trim()) return;
+    const rel=prompt('الصلة (والد / والدة …)','')||null; const ph=prompt('رقم الهاتف / واتساب مع كود الدولة','')||null;
+    const {error}=await supabaseClient.from('guardians').insert({family_id:f.id,full_name:full.trim(),relation:rel&&rel.trim()||null,phone:ph&&ph.trim()||null,whatsapp:ph&&ph.trim()||null,is_primary:!gs.length});
+    if(error) return fail(error); await famRefresh('✅ تمت إضافة ولي الأمر');
+  });
+  body.querySelectorAll('.k_unlink').forEach(b=>b.addEventListener('click',async()=>{
+    if(!confirm('فك ربط هذا الطالب بالأسرة؟ (لا يُحذف الطالب ولا بياناته)')) return;
+    const {error}=await supabaseClient.from('students').update({family_id:null}).eq('id',b.dataset.k);
+    if(error) return fail(error); await famRefresh('✅ تم فك الربط');
+  }));
+  document.getElementById('famLink').addEventListener('click',async()=>{
+    const sid=document.getElementById('famFree').value; if(!sid){ toast('اختر طالبًا أولًا'); return; }
+    const {error}=await supabaseClient.from('students').update({family_id:f.id}).eq('id',sid);
+    if(error) return fail(error); await famRefresh('✅ تم ربط الطالب بالأسرة');
+  });
 }
 
 function exportCsv(){
@@ -1973,7 +2135,7 @@ function isAdmin(){ return !!(currentUser && currentUser.role==='admin'); }
 function applyRoleUI(){
   const financeBtn = document.querySelector('.tabs .tab-btn[data-tab="finance"]');
   if(financeBtn) financeBtn.style.display = isAdmin() ? '' : 'none';
-  if(!isAdmin() && (currentTab==='finance' || currentTab==='stats' || currentTab==='supervisors')) currentTab='today';
+  if(!isAdmin() && (currentTab==='finance' || currentTab==='stats' || currentTab==='supervisors' || currentTab==='audit')) currentTab='today';
 }
 
 async function loadCurrentUserProfile(){
