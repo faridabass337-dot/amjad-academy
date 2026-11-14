@@ -1870,10 +1870,10 @@ function renderBookings(c){
 
 // ---------- Supervisors management (admin only) ----------
 async function supAdminCall(body){
-  const r=await supabaseClient.functions.invoke('admin-users',{body});
+  const r=await supabaseClient.functions.invoke('smart-action',{body});
   if(r.error){ let m=r.error.message||String(r.error);
     try{ if(r.error.context&&r.error.context.json){ const j=await r.error.context.json(); if(j&&j.error) m=j.error; } }catch(e){}
-    if(/not found|Failed to send|FunctionsFetch|404/i.test(m)) m='خدمة إدارة المستخدمين غير مفعّلة بعد على Supabase (دالة admin-users). انشرها أولًا ثم أعد المحاولة.\n'+m;
+    if(/not found|Failed to send|FunctionsFetch|404/i.test(m)) m='خدمة إدارة المستخدمين غير مفعّلة بعد على Supabase (دالة smart-action). انشرها أولًا ثم أعد المحاولة.\n'+m;
     throw new Error(m); }
   if(r.data&&r.data.error) throw new Error(r.data.error);
   return r.data;
