@@ -557,7 +557,13 @@ function renderStudents(c){
   c.querySelectorAll('[data-edit]').forEach(b=>b.addEventListener('click',e=>{ e.stopPropagation(); openForm(b.dataset.edit); }));
   c.querySelectorAll('[data-del]').forEach(b=>b.addEventListener('click',e=>{
     e.stopPropagation();
-    if(confirm('متأكد إنك عايز تحذف الطالب ده؟')){ queueDelete('students',b.dataset.del); students=students.filter(s=>s.id!==b.dataset.del); saveStudents(); render(); }
+    (async()=>{ const sid=b.dataset.del; const st=students.find(x=>x.id===sid); if(!st) return;
+      if(!confirm('نقل الطالب «'+st.name+'» إلى سلة المهملات؟ (يمكن استرجاعه)')) return;
+      if(isAdmin()&&supabaseClient){ const subs=await supabaseClient.from('subscriptions').select('id').eq('student_id',sid).is('deleted_at',null);
+        const ids=(subs.data||[]).map(x=>x.id);
+        if(!(await trashSave('student',sid,st.name,{subscription_ids:ids}))) return;
+        if(ids.length) await supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).in('id',ids); }
+      queueDelete('students',sid); students=students.filter(x=>x.id!==sid); saveStudents(); render(); toast('نُقل إلى سلة المهملات'); })();
   }));
 }
 
@@ -857,7 +863,10 @@ function renderProfile(c){
     openPackageForm(s.id,null,{subject:pkg.subject,teacherId:pkg.teacherId,whatsappGroup:pkg.whatsappGroup,schedule:pkg.schedule,sessionMinutes:pkg.sessionMinutes});
   }));
   c.querySelectorAll('[data-del-pkg]').forEach(b=>b.addEventListener('click',()=>{
-    if(confirm('حذف الباقة دي نهائيًا؟')){ const did=b.dataset.delPkg; const gone=s.packages.find(p=>p.id===did); s.packages=s.packages.filter(p=>p.id!==did); if(gone&&gone.schedule&&gone.schedule.length){ const keep=new Set(s.packages.flatMap(p=>(p.schedule||[]).map(schedKey))); const del=new Set(gone.schedule.map(schedKey)); s.schedule=(s.schedule||[]).filter(sl=>!del.has(schedKey(sl))||keep.has(schedKey(sl))); } saveStudents(); if(isAdmin()&&supabaseClient) supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).eq('id',did).then(r=>{ if(r.error) console.error(r.error); }); render(); }
+    (async()=>{ const did=b.dataset.delPkg; const gone=s.packages.find(p=>p.id===did); if(!gone) return;
+      if(!confirm('نقل باقة «'+(gone.subject||'')+'» إلى سلة المهملات؟ (يمكن استرجاعها)')) return;
+      if(isAdmin()&&supabaseClient&&!(await trashSave('package',did,(s.name||'')+' — '+(gone.subject||''),{student_id:s.id,package:gone}))) return;
+      { s.packages=s.packages.filter(p=>p.id!==did); if(gone&&gone.schedule&&gone.schedule.length){ const keep=new Set(s.packages.flatMap(p=>(p.schedule||[]).map(schedKey))); const del=new Set(gone.schedule.map(schedKey)); s.schedule=(s.schedule||[]).filter(sl=>!del.has(schedKey(sl))||keep.has(schedKey(sl))); } saveStudents(); if(isAdmin()&&supabaseClient) supabaseClient.from('subscriptions').update({deleted_at:new Date().toISOString()}).eq('id',did).then(r=>{ if(r.error) console.error(r.error); }); render(); toast('نُقلت إلى سلة المهملات'); } })();
   }));
 }
 
@@ -1189,6 +1198,96 @@ async function openImportModal(){
       catch(err){ out.innerHTML='<div class="fin-box" style="color:#B8391A;">⚠️ '+escapeHtml(err.message||String(err))+'</div><div class="package-sub">راجع شاشة الأسر؛ ما حُفظ قبل الخطأ يبقى كما هو ولن يتكرر عند إعادة الرفع.</div>'; }
     });
   });
+}
+
+// ===== سلة المهملات: كل حذف يُسجَّل في recycle_bin ويمكن استرجاعه. لا حذف نهائي من التطبيق =====
+async function trashSave(kind,refId,title,data){
+  try{ const r=await supabaseClient.from('recycle_bin').insert({kind,ref_id:String(refId),title:title||'',data:data||{}});
+    if(r.error) throw r.error; return true; }
+  catch(e){ alert('تعذّر حفظ نسخة في سلة المهملات، فلم يُنفَّذ الحذف حفاظًا على بياناتك.\n'+(e.message||e)); return false; }
+}
+const TRASH_KINDS={student:'👤 طالب',teacher:'👨‍🏫 معلم',package:'📦 باقة',transaction:'💰 معاملة'};
+async function openTrash(){
+  if(!isAdmin()||!supabaseClient){ toast('سلة المهملات للمدير وبالاتصال بالسحابة'); return; }
+  document.getElementById('settingsMenuRoot').innerHTML='';
+  const root=document.getElementById('modalRoot');
+  root.innerHTML=`<div class="modal-overlay" id="overlay"><div class="modal"><div class="modal-head"><div class="modal-title">🗑️ سلة المهملات</div><button class="close-btn" id="closeModal">✕</button></div><div id="trashBody"><div class="empty">جارٍ التحميل…</div></div></div></div>`;
+  document.getElementById('overlay').addEventListener('click',e=>{if(e.target.id==='overlay')closeForm();});
+  document.getElementById('closeModal').addEventListener('click',closeForm);
+  await trashDraw();
+}
+async function trashDraw(){
+  const body=document.getElementById('trashBody'); if(!body) return;
+  const r=await supabaseClient.from('recycle_bin').select('*').is('restored_at',null).order('deleted_at',{ascending:false});
+  if(r.error){ body.innerHTML='<div class="empty" style="color:#B8391A;">تعذّر تحميل السلة: '+escapeHtml(r.error.message||'')+'</div>'; return; }
+  const items=(r.data||[]).map(x=>({src:'bin',id:x.id,kind:x.kind,ref:x.ref_id,title:x.title,at:x.deleted_at,data:x.data||{}}));
+  const have=new Set(items.map(i=>i.kind+'|'+i.ref));
+  for(const [tbl,kind] of [['students','student'],['teachers','teacher']]){
+    const q=await supabaseClient.from(tbl).select('id,name,deleted_at').not('deleted_at','is',null);
+    if(!q.error) (q.data||[]).forEach(x=>{ if(!have.has(kind+'|'+x.id)) items.push({src:'legacy',kind,ref:x.id,title:x.name,at:x.deleted_at,data:{}}); });
+  }
+  items.sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+  if(!items.length){ body.innerHTML='<div class="empty">السلة فارغة</div>'; return; }
+  body.innerHTML='<div class="package-sub" style="margin-bottom:8px;">«استرجاع» يعيد العنصر كما كان. «حذف نهائي» لا رجعة فيه، ويُؤخذ قبله نسخة احتياطية تلقائيًا. ما عليه سجلات مالية لا يُحذف نهائيًا.</div><button class="mini-btn" id="trashEmpty" style="color:#B8391A;border-color:#E7C9C9;margin-bottom:8px;">🧹 إفراغ السلة نهائيًا</button>'+items.map((it,i)=>`<div class="package-card" style="margin-bottom:8px;"><div class="package-head"><div><div class="package-title">${TRASH_KINDS[it.kind]||it.kind} — ${escapeHtml(it.title||'')}</div><div class="package-sub">حُذف: ${escapeHtml(String(it.at||'').slice(0,16).replace('T',' '))}${it.src==='legacy'?' · قديم':''}</div></div><div style="display:flex;gap:6px;flex-wrap:wrap;"><button class="mini-btn filled" data-restore="${i}">↩️ استرجاع</button><button class="mini-btn" data-purge="${i}" style="color:#B8391A;border-color:#E7C9C9;">🗑️ حذف نهائي</button></div></div></div>`).join('');
+  body.querySelectorAll('[data-purge]').forEach(b=>b.addEventListener('click',async()=>{
+    const it=items[Number(b.dataset.purge)];
+    if(!confirm('حذف «'+(it.title||'')+'» نهائيًا؟\nلا يمكن التراجع بعد ذلك (تؤخذ نسخة احتياطية قبله).')) return;
+    b.disabled=true; const r=await trashPurge([it]);
+    if(r.error){ alert(r.error); b.disabled=false; return; }
+    if(r.refused.length){ alert('لم يُحذف: '+r.refused[0].reason); b.disabled=false; return; }
+    toast('تم الحذف النهائي'); await trashDraw();
+  }));
+  const te=body.querySelector('#trashEmpty'); if(te) te.addEventListener('click',async()=>{
+    const v=prompt('سيُحذف نهائيًا كل ما في السلة ('+items.length+' عنصر)، عدا ما عليه سجلات مالية.\nاكتب كلمة: حذف  للتأكيد');
+    if(v===null) return; if(v.trim()!=='حذف'){ toast('لم يُنفَّذ: التأكيد غير مطابق'); return; }
+    te.disabled=true; const r=await trashPurge(items);
+    if(r.error){ alert(r.error); te.disabled=false; return; }
+    alert('تم حذف '+r.done+' عنصر نهائيًا.'+(r.refused.length?'\nلم يُحذف '+r.refused.length+' (سجلات مالية أو غيرها):\n'+r.refused.map(x=>'• '+x.title+' — '+x.reason).join('\n'):''));
+    await trashDraw();
+  });
+  body.querySelectorAll('[data-restore]').forEach(b=>b.addEventListener('click',async()=>{
+    b.disabled=true; const it=items[Number(b.dataset.restore)];
+    try{ await trashRestore(it); toast('تم الاسترجاع'); await trashDraw(); }
+    catch(e){ b.disabled=false; alert('تعذّر الاسترجاع: '+(e.message||e)); }
+  }));
+}
+async function trashPurge(list){
+  const sb=supabaseClient; const order={transaction:0,package:1,student:2,teacher:3};
+  const bk=await sb.rpc('take_backup',{p_kind:'manual'});
+  if(bk.error) return {error:'تعذّر أخذ النسخة الاحتياطية، لم يُحذف شيء: '+(bk.error.message||'')};
+  let done=0; const refused=[];
+  for(const it of list.slice().sort((a,b)=>(order[a.kind]??9)-(order[b.kind]??9))){
+    const r=await sb.rpc('purge_trash',{p_kind:it.kind,p_ref:String(it.ref)});
+    if(r.error) refused.push({title:it.title,reason:r.error.message||'خطأ'});
+    else if(r.data&&r.data.ok) done++;
+    else refused.push({title:it.title,reason:(r.data&&r.data.reason)||'مرفوض'});
+  }
+  return {done,refused,backup:bk.data};
+}
+async function trashRestore(it){
+  const sb=supabaseClient;
+  const must=r=>{ if(r&&r.error) throw r.error; return r; };
+  if(it.kind==='student'){
+    must(await sb.from('students').update({deleted_at:null}).eq('id',it.ref));
+    const ids=(it.data&&it.data.subscription_ids)||[]; if(ids.length) must(await sb.from('subscriptions').update({deleted_at:null}).in('id',ids));
+    try{ const k='amjad_pdel_students'; localStorage.setItem(k,JSON.stringify((JSON.parse(localStorage.getItem(k)||'[]')).filter(x=>x!==it.ref))); }catch(e){}
+    await loadFromCloud();
+  } else if(it.kind==='teacher'){
+    must(await sb.from('teachers').update({deleted_at:null}).eq('id',it.ref));
+    try{ const k='amjad_pdel_teachers'; localStorage.setItem(k,JSON.stringify((JSON.parse(localStorage.getItem(k)||'[]')).filter(x=>x!==it.ref))); }catch(e){}
+    await loadFromCloud();
+  } else if(it.kind==='package'){
+    const st=students.find(x=>x.id===it.data.student_id); if(!st) throw new Error('الطالب غير موجود. استرجع الطالب أولًا من السلة.');
+    const pkg=it.data.package; if(!(st.packages||[]).some(p=>p.id===pkg.id)){ st.packages=(st.packages||[]).concat([pkg]);
+      const have=new Set((st.schedule||[]).map(schedKey)); st.schedule=(st.schedule||[]).slice(); (pkg.schedule||[]).forEach(sl=>{ if(!have.has(schedKey(sl))){ st.schedule.push(sl); have.add(schedKey(sl)); } }); }
+    must(await sb.from('subscriptions').update({deleted_at:null}).eq('id',pkg.id));
+    saveStudents(); markFinDirty(pkg.id); try{ await mirrorDirty(); }catch(e){}
+  } else if(it.kind==='transaction'){
+    const tx=it.data.tx; if(tx&&!transactions.some(t=>t.id===tx.id)){ transactions.push(tx); saveTransactions(); }
+    try{ const k='amjad_pdel_transactions'; localStorage.setItem(k,JSON.stringify((JSON.parse(localStorage.getItem(k)||'[]')).filter(x=>x!==(tx&&tx.id)))); }catch(e){}
+  }
+  if(it.src==='bin') must(await sb.from('recycle_bin').update({restored_at:new Date().toISOString()}).eq('id',it.id));
+  render();
 }
 // ===== المواعيد الأسبوعية: وقت النهاية، تعارض المعلم/الطالب، توقيت الأسرة =====
 const ACADEMY_TZ='Africa/Cairo', DEFAULT_LESSON_MIN=60;
@@ -1673,7 +1772,9 @@ function renderTeachers(c){
   c.querySelectorAll('[data-edit-teacher]').forEach(b=>b.addEventListener('click',()=>openTeacherForm(b.dataset.editTeacher)));
   c.querySelectorAll('[data-del-teacher]').forEach(b=>b.addEventListener('click',()=>{
     const id=b.dataset.delTeacher;
-    if(confirm('متأكد من حذف المعلم؟')){ queueDelete('teachers',id); teachers=teachers.filter(t=>t.id!==id); saveTeachers(); render(); }
+    (async()=>{ const t=teachers.find(x=>x.id===id); if(!t) return; if(!confirm('نقل المعلم «'+t.name+'» إلى سلة المهملات؟ (يمكن استرجاعه)')) return;
+      if(isAdmin()&&supabaseClient&&!(await trashSave('teacher',id,t.name,{}))) return;
+      queueDelete('teachers',id); teachers=teachers.filter(x=>x.id!==id); saveTeachers(); render(); toast('نُقل إلى سلة المهملات'); })();
   }));
   c.querySelectorAll('[data-pay-salary]').forEach(b=>b.addEventListener('click',()=>{
     const t=teachers.find(x=>x.id===b.dataset.paySalary);
@@ -1765,7 +1866,9 @@ function renderFinance(c){
       `;
       txList.appendChild(row);
     });
-    txList.querySelectorAll('[data-deltx]').forEach(b=>b.addEventListener('click',()=>{ queueDelete('transactions',b.dataset.deltx); transactions=transactions.filter(t=>t.id!==b.dataset.deltx); saveTransactions(); render(); }));
+    txList.querySelectorAll('[data-deltx]').forEach(b=>b.addEventListener('click',async()=>{ const tid=b.dataset.deltx; const tx=transactions.find(t=>t.id===tid); if(!tx) return;
+      if(isAdmin()&&supabaseClient&&!(await trashSave('transaction',tid,(tx.description||tx.category||'معاملة')+' — '+(tx.amount||''),{tx}))) return;
+      queueDelete('transactions',tid); transactions=transactions.filter(t=>t.id!==tid); saveTransactions(); render(); toast('نُقلت إلى سلة المهملات'); }));
   }
 }
 function openTxForm(){
@@ -2110,6 +2213,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   root.innerHTML=`<div style="position:fixed;top:56px;left:16px;background:#fff;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.2);z-index:80;overflow:hidden;min-width:190px;" id="settingsMenu">
     ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="familiesBtn">👪 الأسر وأولياء الأمور</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importXlsBtn">📥 استيراد من Excel</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="trashBtn">🗑️ سلة المهملات</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="teachersFinBtn">👨‍🏫 كشف المعلمين والصرف</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
@@ -2123,6 +2227,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   </div>`;
   if(isAdmin()){
   document.getElementById('familiesBtn').addEventListener('click',openFamiliesModal);
+  { const tb=document.getElementById('trashBtn'); if(tb) tb.addEventListener('click',openTrash); }
   { const ib=document.getElementById('importXlsBtn'); if(ib) ib.addEventListener('click',openImportModal); }
   document.getElementById('teachersFinBtn').addEventListener('click',openTeacherStatements);
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
