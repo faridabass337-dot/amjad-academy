@@ -359,7 +359,7 @@ let expandedId=null;
 let editingId=null;
 let notifiedFlags={};
 let searchQuery='';
-let statusFilter='all';
+let statusFilter='all'; let payFilter='';
 let finTypeFilter='all';
 let lastCurrency=localStorage.getItem('amjad_last_currency')||'EGP';
 
@@ -552,12 +552,21 @@ function renderStudents(c){
   if(isAdmin()&&supInfo.loaded){ const n=students.filter(x=>!(supInfo.map[x.id]||[]).length).length; filters.push(['nosup','⚠️ بدون مشرف ('+n+')']); }
   chips.innerHTML=filters.map(([k,l])=>`<button class="btn-outline" style="${statusFilter===k?'background:var(--ink);color:#fff;border-color:var(--ink);':''}" data-filter="${k}">${l}</button>`).join('');
   c.appendChild(chips);
+  if(isAdmin()){
+    const base=students.filter(s=>(!searchQuery||s.name.includes(searchQuery)||(s.parentName||'').includes(searchQuery))&&(statusFilter==='all'||(statusFilter==='nosup'?!(supInfo.map[s.id]||[]).length:s.status===statusFilter)));
+    const cnt={}; base.forEach(s=>{ const k=studentPayState(s).state; if(k) cnt[k]=(cnt[k]||0)+1; });
+    const row=['','paid','unpaid','partial','deferred','noprice'].map(k=>{ const u=PAY_UI[k]; const on=payFilter===k; const n=k===''?base.length:(cnt[k]||0);
+      return `<button class="btn-outline" data-payf="${k}" style="${on?(k===''?'background:var(--ink);color:#fff;border-color:var(--ink);':`background:${u.bg};color:${u.c};border-color:${u.bd};font-weight:800;`):''}">${k===''?'💰 كل الدفع':u.i+' '+u.l} (${n})</button>`; }).join('');
+    chips.insertAdjacentHTML('beforeend','<div style="flex-basis:100%;width:100%;display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">'+row+'</div>');
+    chips.querySelectorAll('[data-payf]').forEach(b=>b.addEventListener('click',()=>{ payFilter=b.dataset.payf; render(); }));
+  }
   chips.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{ statusFilter=b.dataset.filter; render(); }));
 
   let filtered=students.filter(s=>{
     const ms=!searchQuery||s.name.includes(searchQuery)||(s.parentName||'').includes(searchQuery);
     const mst=statusFilter==='all'||(statusFilter==='nosup'?!(supInfo.map[s.id]||[]).length:s.status===statusFilter);
-    return ms&&mst;
+    const mp=!payFilter||!isAdmin()||studentPayState(s).state===payFilter;
+    return ms&&mst&&mp;
   });
   if(filtered.length===0){ const e=document.createElement('div'); e.className='empty'; e.innerHTML=students.length===0?'👤<br><br>لسه معملتش أي طالب.. دوس + لإضافة أول طالب':'🔍<br><br>مفيش نتايج'; c.appendChild(e); return; }
   const statusLabel={new:'جديد',active:'نشط',paused:'متوقف'};
@@ -567,9 +576,12 @@ function renderStudents(c){
     row.className='student-row';
     const schedHtml=(s.schedule&&s.schedule.length)?s.schedule.map(sl=>`<span class="schedule-pill">${DAYS[DAY_KEYS.indexOf(sl.day)]} ${sl.time}</span>`).join(''):'';
     const pkgCount=(s.packages||[]).filter(p=>p.active).length;
+    const ps=isAdmin()?studentPayState(s):{state:null};
+    if(ps.state){ row.style.borderInlineStart='5px solid '+PAY_UI[ps.state].bd; }
     row.innerHTML=`
       <div class="info" data-open="${s.id}">
         <div class="name">${escapeHtml(s.name)} ${s.status?`<span class="status-badge ${statusClass[s.status]||''}">${statusLabel[s.status]||''}</span>`:''}</div>
+        ${ps.state?`<div style="margin:5px 0 3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${payPill(ps.state,true)}${(ps.state==='unpaid'||ps.state==='partial'||ps.state==='deferred')&&ps.remaining>0?`<span style="font-size:12px;color:#A12116;font-weight:700;">المتبقي ${Math.round(ps.remaining).toLocaleString('en-US')} ج.م</span>`:''}${ps.n>1&&ps.bad>0?`<span style="font-size:11px;color:#777;">(${ps.bad} من ${ps.n} باقات)</span>`:''}</div>`:''}
         <div class="meta">${escapeHtml(s.subject||'')}</div>
         ${(isAdmin()&&supInfo.loaded)?((supInfo.map[s.id]||[]).length?`<div class="meta" style="color:#1E7A46;">🛡️ ${escapeHtml(supInfo.map[s.id].join('، '))}</div>`:`<div class="meta" style="color:#B8391A;font-weight:700;">⚠️ بدون مشرف</div>`):''}
         <div>${schedHtml}</div>
@@ -1503,12 +1515,22 @@ function pkgFin(p){
   if(net>0){ status=remaining<=0?'paid':(paid>0?'partial':'unpaid'); } else if(p.paid){ status='paid'; }
   return {total,disc,net,paid,pending:r2(pending),remaining,status};
 }
+// حالة الدفع الظاهرة في الواجهة (للمدير فقط)
+const PAY_UI={paid:{i:'✅',l:'مدفوع',c:'#136B3A',bg:'#DDF3E4',bd:'#1E7A46'},unpaid:{i:'❌',l:'غير مدفوع',c:'#A12116',bg:'#FDE3E0',bd:'#C0392B'},partial:{i:'🟠',l:'دفع جزئي',c:'#8A5A00',bg:'#FFF0C9',bd:'#D9A21B'},deferred:{i:'⏳',l:'مؤجل',c:'#244E9C',bg:'#E1EAFB',bd:'#4A74C9'},noprice:{i:'➖',l:'بدون سعر',c:'#666',bg:'#EEE',bd:'#BBB'}};
+function pkgPayState(p){ const f=pkgFin(p); if(f.net<=0&&!p.paid) return 'noprice'; if(f.status==='paid') return 'paid'; if(f.pending>0&&f.paid+f.pending>=f.net) return 'deferred'; return f.status==='partial'?'partial':'unpaid'; }
+function studentPayState(st){
+  const ps=(st.packages||[]).filter(p=>p.active!==false); if(!ps.length) return {state:null,remaining:0};
+  const sts=ps.map(pkgPayState); const rem=ps.reduce((a,p)=>a+pkgFin(p).remaining,0);
+  const st1=['unpaid','partial','deferred','paid','noprice'].find(x=>sts.includes(x));
+  return {state:st1,remaining:rem,n:ps.length,bad:sts.filter(x=>x==='unpaid'||x==='partial').length};
+}
+function payPill(state,big){ const u=PAY_UI[state]; if(!u) return ''; return `<span style="display:inline-flex;align-items:center;gap:5px;background:${u.bg};color:${u.c};border:1.5px solid ${u.bd};border-radius:999px;padding:${big?'4px 12px':'2px 9px'};font-weight:800;font-size:${big?'14px':'12px'};white-space:nowrap;"><span style="font-size:${big?'16px':'13px'};">${u.i}</span>${u.l}</span>`; }
 function finBadge(p){
   const f=pkgFin(p);
   const pend=f.pending>0?'<span class="pay-badge pay-part" style="margin-inline-start:4px;">⏳ مؤجل</span>':'';
-  return (f.status==='paid'?'<span class="pay-badge pay-paid">✓ مدفوع بالكامل</span>'
-        :f.status==='partial'?'<span class="pay-badge pay-part">◐ دفعة جزئية</span>'
-        :'<span class="pay-badge pay-unpaid">غير مدفوع</span>')+pend;
+  const st=pkgPayState(p);
+  if(st==='noprice') return payPill('noprice',false);
+  return payPill(st==='deferred'?'deferred':st,true)+(st!=='deferred'&&f.pending>0?'<span style="margin-inline-start:4px;">'+payPill('deferred',false)+'</span>':'');
 }
 function fmtEGP(n){ return Number(n||0).toLocaleString('ar')+' ج.م'; }
 function finBlock(p){
