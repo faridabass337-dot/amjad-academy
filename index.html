@@ -2056,13 +2056,42 @@ async function renderSupervisors(c){
         <button class="mini-btn" data-sup-pass="${sp.id}">🔑 كلمة سر جديدة</button>
       </div>
       <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:13px;font-weight:700;">تعيين الطلاب</summary>
-        <div style="max-height:320px;overflow:auto;margin-top:8px;">
-        ${sorted.map(s=>`<label style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid #F0EAD6;font-size:13px;"><input type="checkbox" data-assign="${sp.id}" data-stu="${escapeHtml(String(s.id))}" ${mine.has(s.id)?'checked':''}> ${escapeHtml(s.name||'')}</label>`).join('')}
+        <input class="search-input" data-asearch placeholder="🔍 دوّر على طالب..." style="margin:8px 0;">
+        <div data-achips style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+          <button class="btn-outline" data-afilter="all">الكل</button>
+          <button class="btn-outline" data-afilter="none">بدون مشرف</button>
+          <button class="btn-outline" data-afilter="mine">معيّنون له</button>
+          <button class="btn-outline" data-afilter="other">عند مشرف آخر</button>
+        </div>
+        <div data-acount style="font-size:11px;color:#888;margin-bottom:4px;"></div>
+        <div style="max-height:360px;overflow:auto;">
+        ${sorted.map(s=>`<label data-arow data-name="${escapeHtml(((s.name||'')+' '+(s.parentName||'')+' '+(s.subject||'')).toLowerCase())}" data-sid="${escapeHtml(String(s.id))}" style="display:flex;align-items:flex-start;gap:8px;padding:7px 4px;border-bottom:1px solid #F0EAD6;font-size:13px;"><input type="checkbox" style="margin-top:3px;" data-assign="${sp.id}" data-stu="${escapeHtml(String(s.id))}" ${mine.has(s.id)?'checked':''}><span style="flex:1;">${escapeHtml(s.name||'')}${s.subject?`<span style="color:#999;font-size:11px;"> · ${escapeHtml(s.subject)}</span>`:''}<span data-atag style="display:block;font-size:11px;"></span></span></label>`).join('')}
         </div>
       </details>
     </div>`;
   }).join('');
   wireAdd();
+  const supName=id=>{ const p=sups.find(x=>x.id===id); return (p&&(p.full_name||'مشرف'))+(p&&!p.active?' (موقوف)':''); };
+  const refreshAssign=card=>{
+    const sid=card.dataset.sup; const q=(card.querySelector('[data-asearch]').value||'').trim().toLowerCase(); const f=card.dataset.afilter||'all'; let shown=0;
+    card.querySelectorAll('[data-arow]').forEach(row=>{
+      const stu=row.dataset.sid; const owners=assigns.filter(a=>a.student_id===stu).map(a=>a.supervisor_id);
+      const isMine=owners.includes(sid), others=owners.filter(o=>o!==sid);
+      const tag=row.querySelector('[data-atag]');
+      tag.innerHTML=owners.length?('<span style="color:#1E7A46;">🛡️ '+escapeHtml(owners.map(supName).join('، '))+'</span>'):'<span style="color:#B8391A;font-weight:700;">⚠️ بدون مشرف</span>';
+      const okF=f==='all'||(f==='none'&&!owners.length)||(f==='mine'&&isMine)||(f==='other'&&others.length>0);
+      const okQ=!q||row.dataset.name.includes(q);
+      row.style.display=(okF&&okQ)?'flex':'none'; if(okF&&okQ) shown++;
+    });
+    card.querySelectorAll('[data-afilter]').forEach(b=>{ const on=b.dataset.afilter===f; b.style.cssText=on?'background:var(--ink);color:#fff;border-color:var(--ink);':''; });
+    card.querySelector('[data-acount]').textContent='المعروض: '+shown+' من '+card.querySelectorAll('[data-arow]').length;
+  };
+  c.querySelectorAll('[data-sup]').forEach(card=>{
+    card.dataset.afilter='all';
+    card.querySelector('[data-asearch]').addEventListener('input',()=>refreshAssign(card));
+    card.querySelectorAll('[data-afilter]').forEach(b=>b.addEventListener('click',()=>{ card.dataset.afilter=b.dataset.afilter; refreshAssign(card); }));
+    refreshAssign(card);
+  });
   c.querySelectorAll('[data-sup-pass]').forEach(b=>b.addEventListener('click',async()=>{
     const sp=sups.find(x=>x.id===b.dataset.supPass); const pw=prompt('كلمة السر الجديدة للمشرف «'+(sp.full_name||'')+'» (8 أحرف على الأقل):'); if(pw===null) return;
     if(pw.length<8){ toast('كلمة السر أقصر من 8 أحرف'); return; }
@@ -2080,6 +2109,7 @@ async function renderSupervisors(c){
     else assigns=assigns.filter(a=>!(a.supervisor_id===sid&&a.student_id===stu));
     const card=cb.closest('[data-sup]');
     card.querySelector('[data-count]').textContent='الطلاب المعيّنين: '+assigns.filter(a=>a.supervisor_id===sid).length;
+    c.querySelectorAll('[data-sup]').forEach(refreshAssign);
     toast('تم الحفظ');
   }));
   c.querySelectorAll('[data-sup-toggle]').forEach(b=>b.addEventListener('click',async()=>{
