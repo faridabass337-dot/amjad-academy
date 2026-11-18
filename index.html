@@ -360,6 +360,42 @@ async function loadFromCloudInner(pull){
   render();
 }
 
+// ---------- مقارنة نسخة الجهاز بالسحابة (آمنة: نسخة احتياطية قبل أي تغيير) ----------
+function cmpSig(s){ return (s.packages||[]).map(p=>[p.id,p.amountEGP||0,p.discount||0,(p.payments||[]).map(x=>(x.amount||0)+':'+(x.status||'')).join(','),p.paid||0].join('|')).sort().join(';'); }
+async function openCompare(){
+  const r=await supabaseClient.rpc('get_students'); if(r.error){ alert('تعذر قراءة السحابة: '+(r.error.message||'')); return; }
+  const cloud=(r.data||[]).map(migrateStudent); const cm=new Map(cloud.map(c=>[c.id,c])); const lm=new Map(students.map(c=>[c.id,c]));
+  const onlyLocal=students.filter(x=>!cm.has(x.id)), onlyCloud=cloud.filter(x=>!lm.has(x.id));
+  const diff=students.filter(x=>cm.has(x.id)&&cmpSig(x)!==cmpSig(cm.get(x.id)));
+  const priced=a=>a.reduce((n,x)=>n+(x.packages||[]).filter(p=>(p.amountEGP||0)>0).length,0);
+  const ov=document.createElement('div'); ov.className='modal-overlay'; ov.style.zIndex=120;
+  ov.innerHTML='<div class="modal"><div class="modal-head"><div class="modal-title">🔄 مقارنة الجهاز بالسحابة</div><button class="close-btn" id="cmpX">✕</button></div>'+
+   '<div style="font-size:13px;line-height:1.9">'+
+   '<div>طلاب في هذا الجهاز: <b>'+students.length+'</b> — في السحابة: <b>'+cloud.length+'</b></div>'+
+   '<div>باقات بسعر في الجهاز: <b>'+priced(students)+'</b> — في السحابة: <b>'+priced(cloud)+'</b></div>'+
+   '<div>طلاب بفروق في الباقات/المدفوعات: <b>'+diff.length+'</b> | فقط هنا: <b>'+onlyLocal.length+'</b> | فقط في السحابة: <b>'+onlyCloud.length+'</b></div>'+
+   (diff.length?'<div style="margin:8px 0;max-height:150px;overflow:auto;background:#f6f6f6;padding:8px;border-radius:8px">'+diff.slice(0,40).map(x=>escapeHtml(x.name||'')).join('، ')+'</div>':'')+
+   '<div style="color:#8a5a00;margin:8px 0">يؤخذ نسخ احتياطي تلقائي قبل أي إجراء. اختر النسخة الأحدث/الأصح:</div>'+
+   '<button id="cmpUp" style="padding:12px;border:0;border-radius:10px;background:#0B1B33;color:#fff;font-size:14px;width:100%;margin:4px 0">⬆️ رفع بيانات هذا الجهاز للسحابة</button>'+
+   '<button id="cmpDown" style="padding:12px;border:0;border-radius:10px;background:#0B1B33;color:#fff;font-size:14px;width:100%;margin:4px 0">⬇️ اعتماد بيانات السحابة على هذا الجهاز</button></div></div>';
+  document.body.appendChild(ov);
+  ov.querySelector('#cmpX').onclick=()=>ov.remove();
+  const bk=async()=>{ const b=await supabaseClient.rpc('take_backup',{p_kind:'manual'}); if(b.error){ alert('تعذر أخذ نسخة احتياطية، أُلغي الإجراء: '+b.error.message); return false; } return true; };
+  ov.querySelector('#cmpUp').onclick=async()=>{
+    if(!confirm('سيتم رفع بيانات هذا الجهاز وكتابتها فوق السحابة للطلاب الموجودين هنا. متأكد؟')) return;
+    if(!(await bk())) return;
+    await syncStudentsToCloud(); if(lastSyncErr&&!cloudOnline){ alert('فشل الرفع: '+lastSyncErr); return; }
+    ov.remove(); await loadFromCloud({pull:true}); toast('✅ تم الرفع والتحديث');
+  };
+  ov.querySelector('#cmpDown').onclick=async()=>{
+    if(!confirm('سيتم استبدال بيانات هذا الجهاز ببيانات السحابة. متأكد؟')) return;
+    if(!(await bk())) return;
+    try{ localStorage.setItem('amjad_students_before_cloud',JSON.stringify(students)); }catch(e){}
+    students=cloud; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(x=>x.id));
+    ov.remove(); render(); toast('✅ تم اعتماد السحابة');
+  };
+}
+
 let currentTab='today';
 let currentView='tabs'; // 'tabs' | 'profile'
 let profileStudentId=null;
@@ -2301,6 +2337,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
     ${isAdmin()?`<div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="familiesBtn">👪 الأسر وأولياء الأمور</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importXlsBtn">📥 استيراد من Excel</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="trashBtn">🗑️ سلة المهملات</div>
+    <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="cmpBtn">🔄 مقارنة هذا الجهاز بالسحابة</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="teachersFinBtn">👨‍🏫 كشف المعلمين والصرف</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</div>
     <div style="padding:12px 16px;font-size:13px;cursor:pointer;border-bottom:1px solid #eee;" id="importBtn">⬆️ استيراد نسخة احتياطية</div>
@@ -2314,7 +2351,7 @@ document.getElementById('settingsBtn').addEventListener('click',()=>{
   </div>`;
   if(isAdmin()){
   document.getElementById('familiesBtn').addEventListener('click',openFamiliesModal);
-  { const tb=document.getElementById('trashBtn'); if(tb) tb.addEventListener('click',openTrash); }
+  { const tb=document.getElementById('trashBtn'); if(tb) tb.addEventListener('click',openTrash); const cb=document.getElementById('cmpBtn'); if(cb) cb.addEventListener('click',openCompare); }
   { const ib=document.getElementById('importXlsBtn'); if(ib) ib.addEventListener('click',openImportModal); }
   document.getElementById('teachersFinBtn').addEventListener('click',openTeacherStatements);
   document.getElementById('exportBtn').addEventListener('click',exportBackup);
