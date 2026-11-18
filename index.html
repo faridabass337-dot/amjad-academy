@@ -2527,7 +2527,7 @@ const REG_COLS=[
  {k:'pay_status',l:'حالة السداد',w:112,fin:1,badge:'pay'},
  {k:'notes',l:'ملاحظات',w:160}
 ];
-const regState={rows:[],loaded:false,q:'',family:'',teacher:'',subject:'',pkg:'',pay:'',country:'',from:'',to:'',sortK:'family_name',sortDir:1,page:1,size:25,err:null,warn:null,syncAt:0,colPanel:false};
+const regState={rows:[],loaded:false,q:'',family:'',teacher:'',subject:'',pkg:'',pay:'',country:'',from:'',to:'',sortK:'family_name',sortDir:1,page:1,payGroup:'',size:25,err:null,warn:null,syncAt:0,colPanel:false};
 function regPrefs(){ try{ return JSON.parse(localStorage.getItem('amjad_reg_cols')||'null')||{}; }catch(e){ return {}; } }
 function regSavePrefs(p){ try{ localStorage.setItem('amjad_reg_cols',JSON.stringify(p)); }catch(e){} }
 function regAllowed(){ return REG_COLS.filter(c=>isAdmin()||!c.fin); }
@@ -2566,6 +2566,8 @@ async function regLoad(force){
   else regState.rows=data||[];
   regState.loaded=true;
 }
+// مدفوع = مدفوعة بالكامل · غير مدفوع = غير مدفوعة + مدفوعة جزئيًا · مؤجل = متأخرة · بدون سعر
+function regPayGroup(ps){ return ({'مدفوعة بالكامل':'paid','غير مدفوعة':'unpaid','مدفوعة جزئيًا':'unpaid','متأخرة':'late','بدون سعر':'noprice'})[ps]||'other'; }
 function regFiltered(){
   const s=regState, q=s.q.trim().toLowerCase();
   let rows=s.rows.filter(r=>{
@@ -2575,6 +2577,7 @@ function regFiltered(){
     if(s.subject&&r.subject!==s.subject) return false;
     if(s.pkg&&r.package_status!==s.pkg) return false;
     if(s.pay&&r.pay_status!==s.pay) return false;
+    if(s.payGroup&&regPayGroup(r.pay_status)!==s.payGroup) return false;
     if(s.country&&(r.country||'—')!==s.country) return false;
     if(s.from&&!(r.start_date&&r.start_date>=s.from)) return false;
     if(s.to&&!(r.start_date&&r.start_date<=s.to)) return false;
@@ -2670,9 +2673,12 @@ function regDraw(){
   if(adm) cards.push(['إجمالي قيمة الباقات',regFmt(t.net)+' ج.م'],['المحصّل',regFmt(t.paid)+' ج.م'],['المتبقي',regFmt(t.rem)+' ج.م'],['مستحقات المعلمين',regCurMap(t.due)],['المصروف للمعلمين',regCurMap(t.tpaid)],['غير المصروف للمعلمين',regCurMap(regUnpaidMap(t))]);
   document.getElementById('regCards').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:6px;margin-bottom:8px;">${cards.map(([l,v])=>`<div class="fin-box" style="margin:0;text-align:center;"><div style="font-size:11px;color:var(--muted);">${l}</div><div style="font-weight:800;font-size:15px;">${typeof v==='number'?v:escapeHtml(String(v))}</div></div>`).join('')}</div>`;
   const chips=document.getElementById('regChips');
-  if(chips){ const opts=[['','الكل'],['مدفوعة بالكامل','✅ مدفوعة'],['مدفوعة جزئيًا','◐ جزئيًا'],['غير مدفوعة','❌ غير مدفوعة'],['متأخرة','⏰ متأخرة'],['مستردة','↩️ مستردة']];
-    chips.innerHTML=opts.map(([v,l])=>`<button class="mini-btn ${s.pay===v?'filled':''}" data-chip="${escapeHtml(v)}">${l}</button>`).join('');
-    chips.querySelectorAll('[data-chip]').forEach(b=>b.addEventListener('click',()=>{ s.pay=b.dataset.chip; s.page=1; const e=document.getElementById('regPay'); if(e) e.value=s.pay; regDraw(); })); }
+  if(chips){
+    const keep=s.payGroup; s.payGroup=''; const base=regFiltered(); s.payGroup=keep;
+    const cnt={}; base.forEach(r=>{ const g=regPayGroup(r.pay_status); cnt[g]=(cnt[g]||0)+1; });
+    const opts=[['','الكل',base.length],['paid','✅ مدفوع',cnt.paid||0],['unpaid','❌ غير مدفوع',cnt.unpaid||0],['late','⏳ مؤجل / متأخر',cnt.late||0],['noprice','بدون سعر',cnt.noprice||0]];
+    chips.innerHTML=opts.map(([v,l,n])=>`<button class="mini-btn ${s.payGroup===v?'filled':''}" data-chip="${v}">${l} (${n})</button>`).join('')+'<div style="flex-basis:100%;font-size:10px;color:var(--muted);">غير مدفوع = غير مدفوعة + مدفوعة جزئيًا · مؤجل = متأخرة</div>';
+    chips.querySelectorAll('[data-chip]').forEach(b=>b.addEventListener('click',()=>{ s.payGroup=b.dataset.chip; s.page=1; regDraw(); })); }
   const pages=Math.max(1,Math.ceil(rows.length/s.size)); if(s.page>pages) s.page=pages;
   const slice=rows.slice((s.page-1)*s.size,s.page*s.size);
   document.getElementById('regTable').innerHTML=`<div style="overflow:auto;max-height:66vh;border:1px solid #E3DCC8;border-radius:10px;background:#fff;">
