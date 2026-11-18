@@ -258,7 +258,16 @@ async function flushDeletes(table,soft){
 async function syncStudentsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
-    if(students.length){ const {error}=await supabaseClient.from('students').upsert(students.map(s=>{ const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade; return c; }),{onConflict:'id'}); if(error)throw error; } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
+    if(isAdmin()){
+      if(students.length){ const {error}=await supabaseClient.from('students').upsert(students.map(s=>{ const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade; return c; }),{onConflict:'id'}); if(error)throw error; }
+    } else {
+      // المشرف: تعديل فقط (update) للطلاب المعيّنين له، صفًا صفًا، فلا يُسقط صفٌّ مرفوض بقية الحفظ ولا يُنشأ طالب
+      let known=[]; try{ known=JSON.parse(localStorage.getItem('amjad_known_students')||'[]'); }catch(e){}
+      const ks=new Set(known); const mine=students.filter(x=>ks.has(x.id));
+      if(mine.length!==students.length){ students=mine; localStorage.setItem('amjad_students',JSON.stringify(students)); }
+      const rs=await Promise.all(mine.map(x=>{ const c=Object.assign({},x); delete c.id; delete c.family_id; delete c.stage; delete c.grade; return supabaseClient.from('students').update(c).eq('id',x.id); }));
+      const bad=rs.find(r=>r.error); if(bad) throw bad.error;
+    } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
     await flushDeletes('students',true);
     if(isAdmin()) await flushStudentMeta();
     cloudOnline=true;
@@ -3276,7 +3285,7 @@ document.getElementById('fabAdd').addEventListener('click',()=>{
   if(currentTab==='finance') openTxForm();
   else if(currentTab==='teachers') openTeacherForm(null);
   else if(isAdmin()) openFamilyWizard();
-  else openForm(null);
+  else toast('إضافة الطلاب من المدير فقط');
 });
 
 // ---------- notifications ----------
