@@ -525,7 +525,23 @@ function renderToday(c){
 }
 
 // ---------- STUDENTS ----------
+// من المشرف على كل طالب (للمدير فقط)
+const supInfo={loaded:false,loading:false,map:{}};
+async function supInfoLoad(force){
+  if(!isAdmin()||!supabaseClient||supInfo.loading||(supInfo.loaded&&!force)) return;
+  supInfo.loading=true;
+  try{
+    const [pr,ar]=await Promise.all([supabaseClient.from('profiles').select('id,full_name,active').eq('role','supervisor'),supabaseClient.from('supervisor_students').select('supervisor_id,student_id')]);
+    if(pr.error||ar.error) throw (pr.error||ar.error);
+    const nm={}; (pr.data||[]).forEach(p=>{ nm[p.id]=(p.full_name||'مشرف')+(p.active?'':' (موقوف)'); });
+    const m={}; (ar.data||[]).forEach(a=>{ if(nm[a.supervisor_id]) (m[a.student_id]=m[a.student_id]||[]).push(nm[a.supervisor_id]); });
+    supInfo.map=m; supInfo.loaded=true;
+    if(currentView==='tabs'&&currentTab==='students') render();
+  }catch(e){ console.error('supInfoLoad',e); }
+  supInfo.loading=false;
+}
 function renderStudents(c){
+  if(isAdmin()) supInfoLoad(false);
   const searchBar=document.createElement('input');
   searchBar.className='search-input'; searchBar.placeholder='🔍 دور باسم الطالب أو ولي الأمر...'; searchBar.value=searchQuery;
   searchBar.addEventListener('input',e=>{ searchQuery=e.target.value; render(); });
@@ -533,13 +549,14 @@ function renderStudents(c){
   const chips=document.createElement('div');
   chips.style.display='flex'; chips.style.gap='8px'; chips.style.marginBottom='12px'; chips.style.flexWrap='wrap';
   const filters=[['all','الكل'],['new','جديد'],['active','نشط'],['paused','متوقف']];
+  if(isAdmin()&&supInfo.loaded){ const n=students.filter(x=>!(supInfo.map[x.id]||[]).length).length; filters.push(['nosup','⚠️ بدون مشرف ('+n+')']); }
   chips.innerHTML=filters.map(([k,l])=>`<button class="btn-outline" style="${statusFilter===k?'background:var(--ink);color:#fff;border-color:var(--ink);':''}" data-filter="${k}">${l}</button>`).join('');
   c.appendChild(chips);
   chips.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>{ statusFilter=b.dataset.filter; render(); }));
 
   let filtered=students.filter(s=>{
     const ms=!searchQuery||s.name.includes(searchQuery)||(s.parentName||'').includes(searchQuery);
-    const mst=statusFilter==='all'||s.status===statusFilter;
+    const mst=statusFilter==='all'||(statusFilter==='nosup'?!(supInfo.map[s.id]||[]).length:s.status===statusFilter);
     return ms&&mst;
   });
   if(filtered.length===0){ const e=document.createElement('div'); e.className='empty'; e.innerHTML=students.length===0?'👤<br><br>لسه معملتش أي طالب.. دوس + لإضافة أول طالب':'🔍<br><br>مفيش نتايج'; c.appendChild(e); return; }
@@ -554,6 +571,7 @@ function renderStudents(c){
       <div class="info" data-open="${s.id}">
         <div class="name">${escapeHtml(s.name)} ${s.status?`<span class="status-badge ${statusClass[s.status]||''}">${statusLabel[s.status]||''}</span>`:''}</div>
         <div class="meta">${escapeHtml(s.subject||'')}</div>
+        ${(isAdmin()&&supInfo.loaded)?((supInfo.map[s.id]||[]).length?`<div class="meta" style="color:#1E7A46;">🛡️ ${escapeHtml(supInfo.map[s.id].join('، '))}</div>`:`<div class="meta" style="color:#B8391A;font-weight:700;">⚠️ بدون مشرف</div>`):''}
         <div>${schedHtml}</div>
         ${pkgCount?`<div class="meta">📦 ${pkgCount} باقة نشطة</div>`:''}
       </div>
@@ -2058,7 +2076,7 @@ async function renderSupervisors(c){
       : await supabaseClient.from('supervisor_students').delete().eq('supervisor_id',sid).eq('student_id',stu);
     cb.disabled=false;
     if(res.error){ cb.checked=!cb.checked; toast('تعذر الحفظ'); return; }
-    if(cb.checked) assigns.push({supervisor_id:sid,student_id:stu});
+    supInfo.loaded=false; if(cb.checked) assigns.push({supervisor_id:sid,student_id:stu});
     else assigns=assigns.filter(a=>!(a.supervisor_id===sid&&a.student_id===stu));
     const card=cb.closest('[data-sup]');
     card.querySelector('[data-count]').textContent='الطلاب المعيّنين: '+assigns.filter(a=>a.supervisor_id===sid).length;
