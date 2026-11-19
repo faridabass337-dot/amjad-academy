@@ -241,7 +241,7 @@ function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg
 function setKnown(k,ids){ try{ localStorage.setItem('amjad_known_'+k,JSON.stringify(ids)); }catch(e){} }
 let lastSyncErr='';
 function setSyncErr(where,e){ lastSyncErr=where+': '+((e&&(e.message||e.details||e.code))||String(e)); try{localStorage.setItem('amjad_last_sync_err',lastSyncErr);}catch(x){} }
-function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=cloudOnline?('☁️ متصل'+(lastCloudSyncAt?' · آخر تحديث '+lastCloudSyncAt.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}):'')+' ↻'):('⚠️ غير متصل (محلي)'+(lastSyncErr?' — '+lastSyncErr.slice(0,90):'')); el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
+function updateCloudStatus(){ const el=document.getElementById('cloudStatus'); if(!el)return; el.textContent=divergeFlag?'⚠️ هذا الجهاز يختلف عن السحابة — الإعدادات ← مقارنة':cloudOnline?('☁️ متصل'+(lastCloudSyncAt?' · آخر تحديث '+lastCloudSyncAt.toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'}):'')+' ↻'):('⚠️ غير متصل (محلي)'+(lastSyncErr?' — '+lastSyncErr.slice(0,90):'')); el.style.color=cloudOnline?'#8ED1A8':'#E9A08A'; }
 
 
 /* حذف آمن: لا يُحذف شيء من السيرفر إلا لو المستخدم حذفه صراحةً. الطلاب والمعلمون حذف ناعم (deleted_at) */
@@ -306,7 +306,7 @@ async function syncBookingsToCloud(){
   }catch(e){ cloudOnline=false; setSyncErr('sync bookings',e); console.error('sync bookings failed',e); }
   updateCloudStatus();
 }
-let lastCloudSyncAt=null, cloudBusy=false;
+let lastCloudSyncAt=null, cloudBusy=false, divergeFlag=false;
 async function loadFromCloud(opts){
   opts=opts||{}; const pull=!!opts.pull;
   if(cloudBusy) return; cloudBusy=true;
@@ -351,6 +351,7 @@ async function loadFromCloudInner(pull){
     if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings)); setKnown('bookings',bookings.map(b=>b.id));} }
     cloudOnline=true;
     if(!sr.error) lastCloudSyncAt=new Date();
+    if(pull) divergeFlag=needsResync;
     if(pull) needsResync=false; // refresh never pushes local data up; only the startup load reconciles
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
     mirrorDirty();
@@ -377,12 +378,32 @@ async function openCompare(){
    (diff.length?'<div style="margin:8px 0;max-height:150px;overflow:auto;background:#f6f6f6;padding:8px;border-radius:8px">'+diff.slice(0,40).map(x=>escapeHtml(x.name||'')).join('، ')+'</div>':'')+
    '<div style="color:#8a5a00;margin:8px 0">يؤخذ نسخ احتياطي تلقائي قبل أي إجراء. اختر النسخة الأحدث/الأصح:</div>'+
    '<button id="cmpUp" style="padding:12px;border:0;border-radius:10px;background:#0B1B33;color:#fff;font-size:14px;width:100%;margin:4px 0">⬆️ رفع بيانات هذا الجهاز للسحابة</button>'+
+   '<button id="cmpFill" style="width:100%;margin:4px 0;padding:12px;border:0;border-radius:10px;background:#B8892B;color:#fff;font-size:14px">🩹 استعادة الأسعار الناقصة من نسخة احتياطية (آمن)</button>'+
    '<button id="cmpDown" style="padding:12px;border:0;border-radius:10px;background:#0B1B33;color:#fff;font-size:14px;width:100%;margin:4px 0">⬇️ اعتماد بيانات السحابة على هذا الجهاز</button></div></div>';
   document.body.appendChild(ov);
   ov.querySelector('#cmpX').onclick=()=>ov.remove();
   const bk=async()=>{ const b=await supabaseClient.rpc('take_backup',{p_kind:'manual'}); if(b.error){ alert('تعذر أخذ نسخة احتياطية، أُلغي الإجراء: '+b.error.message); return false; } return true; };
+  ov.querySelector('#cmpFill').onclick=async()=>{
+    const id=Number(prompt('رقم النسخة الاحتياطية التي فيها الأسعار (مثلاً 23):','23')); if(!id) return;
+    const g=await supabaseClient.from('backups').select('data,created_at').eq('id',id).single(); if(g.error){ alert('تعذر قراءة النسخة: '+g.error.message); return; }
+    const bs=(g.data.data&&g.data.data.students)||[]; const bm=new Map(bs.map(x=>[x.id,x]));
+    const gain=v=>Number(v)>0; let plan=[];
+    students.forEach(st=>(st.packages||[]).forEach(pk=>{ const b=bm.get(st.id); if(!b) return; const bp=(b.packages||[]).find(q=>q.id===pk.id); if(!bp) return;
+      const needPrice=!gain(pk.amountEGP)&&gain(bp.amountEGP); const needPay=Array.isArray(bp.payments)&&bp.payments.length>(Array.isArray(pk.payments)?pk.payments.length:0)&&gain(bp.amountEGP);
+      if(needPrice||needPay) plan.push({st,pk,bp,needPrice,needPay}); }));
+    if(!plan.length){ alert('لا توجد أسعار ناقصة يمكن استعادتها من هذه النسخة.'); return; }
+    if(!confirm('سيتم استعادة بيانات السعر/المدفوعات لـ '+plan.length+' باقة من نسخة #'+id+' (تاريخ '+g.data.created_at+'). لن يُستبدل أي سعر موجود حالياً، ولن يتأثر أي شيء آخر. متابعة؟')) return;
+    if(!(await bk())) return;
+    plan.forEach(x=>{ if(x.needPrice){ ['amount','currency','amountEGP','discount'].forEach(k=>{ if(x.bp[k]!==undefined) x.pk[k]=x.bp[k]; }); }
+      if(x.needPay){ x.pk.payments=JSON.parse(JSON.stringify(x.bp.payments)); if(x.bp.paid!==undefined) x.pk.paid=x.bp.paid; }
+      try{ markFinDirty(x.pk.id); }catch(e){} });
+    saveStudents(); try{ await mirrorDirty(); }catch(e){}
+    ov.remove(); render(); toast('✅ استُعيدت '+plan.length+' باقة');
+  };
   ov.querySelector('#cmpUp').onclick=async()=>{
-    if(!confirm('سيتم رفع بيانات هذا الجهاز وكتابتها فوق السحابة للطلاب الموجودين هنا. متأكد؟')) return;
+    const pl=priced(students), pc=priced(cloud);
+    if(pl<pc){ alert('⛔ تم إيقاف الرفع: هذا الجهاز فيه '+pl+' باقة مسعّرة والسحابة فيها '+pc+'. الرفع سيمحو أسعاراً موجودة في السحابة. استخدم "اعتماد بيانات السحابة" بدلاً منه.'); return; }
+    if(!confirm('سيتم رفع بيانات هذا الجهاز (باقات مسعّرة: '+pl+') وكتابتها فوق السحابة (باقات مسعّرة: '+pc+'). متأكد؟')) return;
     if(!(await bk())) return;
     await syncStudentsToCloud(); if(lastSyncErr&&!cloudOnline){ alert('فشل الرفع: '+lastSyncErr); return; }
     ov.remove(); await loadFromCloud({pull:true}); toast('✅ تم الرفع والتحديث');
