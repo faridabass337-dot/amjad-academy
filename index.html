@@ -255,18 +255,53 @@ async function flushDeletes(table,soft){
   if(error){ console.error('delete flush failed',table,error); return; }
   localStorage.removeItem(k);
 }
+// ---------- مزامنة الطلاب بنظام "التعديل المتزامن": السحابة هي المرجع، ولا يُرفع إلا ما عدّله هذا الجهاز فعلاً ----------
+function sigOf(s){ try{ return JSON.stringify(s); }catch(e){ return ''; } }
+function getBase(){ try{ return JSON.parse(localStorage.getItem('amjad_base_sigs')||'null'); }catch(e){ return null; } }
+function setBase(o){ try{ localStorage.setItem('amjad_base_sigs',JSON.stringify(o)); }catch(e){} }
+function rebaseTo(list){ const o={}; (list||[]).forEach(x=>{ o[x.id]=sigOf(x); }); setBase(o); }
+function pendingStudentDeletes(){ try{ return new Set(JSON.parse(localStorage.getItem('amjad_pdel_students')||'[]')); }catch(e){ return new Set(); } }
+function dirtyStudents(){ const b=getBase()||{}; return students.filter(x=>b[x.id]===undefined || sigOf(x)!==b[x.id]); }
+// دمج: كل طالب غير معدَّل محليًا يُؤخذ من السحابة؛ المعدَّل محليًا يبقى؛ الجديد محليًا يبقى؛ المحذوف في مكان آخر يُسقط
+function mergeStudents(cloud){
+  const base=getBase(); const pdel=pendingStudentDeletes();
+  if(!base){ // أول تشغيل بالنظام الجديد: السحابة تفوز، وتُحفظ نسخة الجهاز القديمة احتياطًا
+    try{ localStorage.setItem('amjad_students_prerebase',JSON.stringify(students)); }catch(e){}
+    const extra=students.filter(l=>!cloud.some(c=>c.id===l.id) && !(JSON.parse(localStorage.getItem('amjad_known_students')||'[]')).includes(l.id));
+    rebaseTo(cloud); return cloud.filter(c=>!pdel.has(c.id)).concat(extra);
+  }
+  const lm=new Map(students.map(x=>[x.id,x])); const cm=new Map(cloud.map(x=>[x.id,x]));
+  const out=[]; const nb=Object.assign({},base);
+  cloud.forEach(c=>{ if(pdel.has(c.id)) return; const l=lm.get(c.id);
+    if(l && base[c.id]!==undefined && sigOf(l)!==base[c.id]){ out.push(l); } // تعديل محلي لم يُرفع بعد
+    else { out.push(c); nb[c.id]=sigOf(c); } });
+  students.forEach(l=>{ if(cm.has(l.id)) return; if(base[l.id]===undefined) out.push(l); /* جديد محليًا */ else delete nb[l.id]; /* حُذف في مكان آخر */ });
+  setBase(nb); return out;
+}
 async function syncStudentsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
     if(isAdmin()){
-      if(students.length){ const {error}=await supabaseClient.from('students').upsert(students.map(s=>{ const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade; return c; }),{onConflict:'id'}); if(error)throw error; }
+      let dirty=dirtyStudents();
+      if(dirty.length){
+        const base=getBase()||{}; const cr=await supabaseClient.rpc('get_students'); if(cr.error) throw cr.error;
+        const cm=new Map((cr.data||[]).map(migrateStudent).map(x=>[x.id,x])); const conflicts=[];
+        dirty=dirty.filter(d=>{ const c=cm.get(d.id); if(c && base[d.id]!==undefined && sigOf(c)!==base[d.id]){ conflicts.push(d); return false; } return true; });
+        if(conflicts.length){ // عُدّل من جهاز آخر بعد آخر تحديث لنا: لا نكتب فوقه، نعتمد نسخة السحابة
+          const nb=getBase()||{}; conflicts.forEach(d=>{ const c=cm.get(d.id); const i=students.findIndex(x=>x.id===d.id); if(i>=0) students[i]=c; nb[d.id]=sigOf(c); }); setBase(nb);
+          try{ localStorage.setItem('amjad_students',JSON.stringify(students)); }catch(e){}
+          toast('⚠️ عُدّل '+conflicts.map(x=>x.name).slice(0,3).join('، ')+' من جهاز آخر — حُدِّث من السحابة'); render();
+        }
+        if(dirty.length){ const {error}=await supabaseClient.from('students').upsert(dirty.map(s=>{ const c=Object.assign({},s); delete c.family_id; delete c.stage; delete c.grade; return c; }),{onConflict:'id'}); if(error)throw error;
+          const nb=getBase()||{}; dirty.forEach(d=>{ nb[d.id]=sigOf(d); }); setBase(nb); }
+      }
     } else {
       // المشرف: تعديل فقط (update) للطلاب المعيّنين له، صفًا صفًا، فلا يُسقط صفٌّ مرفوض بقية الحفظ ولا يُنشأ طالب
       let known=[]; try{ known=JSON.parse(localStorage.getItem('amjad_known_students')||'[]'); }catch(e){}
       const ks=new Set(known); const mine=students.filter(x=>ks.has(x.id));
       if(mine.length!==students.length){ students=mine; localStorage.setItem('amjad_students',JSON.stringify(students)); }
-      const rs=await Promise.all(mine.map(x=>{ const c=Object.assign({},x); delete c.id; delete c.family_id; delete c.stage; delete c.grade; return supabaseClient.from('students').update(c).eq('id',x.id); }));
-      const bad=rs.find(r=>r.error); if(bad) throw bad.error;
+      const dset=new Set(dirtyStudents().map(x=>x.id)); const rs=await Promise.all(mine.filter(x=>dset.has(x.id)).map(x=>{ const c=Object.assign({},x); delete c.id; delete c.family_id; delete c.stage; delete c.grade; return supabaseClient.from('students').update(c).eq('id',x.id); }));
+      const bad=rs.find(r=>r.error); if(bad) throw bad.error; { const nb=getBase()||{}; mine.forEach(x=>{ if(dset.has(x.id)) nb[x.id]=sigOf(x); }); setBase(nb); }
     } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
     await flushDeletes('students',true);
     if(isAdmin()) await flushStudentMeta();
@@ -328,17 +363,7 @@ async function loadFromCloudInner(pull){
     const cloudTeachers=tcr.error?null:(tcr.data||[]);
     const cloudBookings=br.error?null:(br.data||[]);
     let needsResync=false;
-    const studentsLostData = students.some(localS=>{
-      const cloudS = cloudStudents.find(cs=>cs.id===localS.id);
-      if(!cloudS) return true;
-      const localPkgCount = (localS.packages||[]).length;
-      const cloudPkgCount = (cloudS.packages||[]).length;
-      return cloudPkgCount < localPkgCount;
-    });
-    // Non-admin users only receive their assigned students, so a shorter list is correct, not data loss.
-    if(!isAdmin()){
-      students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(s=>s.id));
-    } else if(cloudStudents.length<students.length || studentsLostData){needsResync=true;} else {students=cloudStudents; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(s=>s.id));}
+    students=mergeStudents(cloudStudents); localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',cloudStudents.map(s=>s.id));
     // Non-admin users are DB-restricted from reading financial tables (transactions) — a shorter/empty
     // result for them is correct permission filtering, not data loss, so never fall back to stale local cache.
     if(!isAdmin()){
@@ -354,6 +379,7 @@ async function loadFromCloudInner(pull){
     if(pull) divergeFlag=needsResync;
     if(pull) needsResync=false; // refresh never pushes local data up; only the startup load reconciles
     if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
+    if(!pull||dirtyStudents().length){ try{ if(dirtyStudents().length) await syncStudentsToCloud(); }catch(e){} }
     mirrorDirty();
     if(isAdmin()) supabaseClient.rpc('ensure_daily_backup').then(r=>{ if(r.error) console.error('daily backup',r.error); });
   }catch(e){ cloudOnline=false; setSyncErr('cloud load',e); console.error('cloud load failed',e); }
@@ -405,14 +431,14 @@ async function openCompare(){
     if(pl<pc){ alert('⛔ تم إيقاف الرفع: هذا الجهاز فيه '+pl+' باقة مسعّرة والسحابة فيها '+pc+'. الرفع سيمحو أسعاراً موجودة في السحابة. استخدم "اعتماد بيانات السحابة" بدلاً منه.'); return; }
     if(!confirm('سيتم رفع بيانات هذا الجهاز (باقات مسعّرة: '+pl+') وكتابتها فوق السحابة (باقات مسعّرة: '+pc+'). متأكد؟')) return;
     if(!(await bk())) return;
-    await syncStudentsToCloud(); if(lastSyncErr&&!cloudOnline){ alert('فشل الرفع: '+lastSyncErr); return; }
+    rebaseTo(cloud); await syncStudentsToCloud(); if(lastSyncErr&&!cloudOnline){ alert('فشل الرفع: '+lastSyncErr); return; }
     ov.remove(); await loadFromCloud({pull:true}); toast('✅ تم الرفع والتحديث');
   };
   ov.querySelector('#cmpDown').onclick=async()=>{
     if(!confirm('سيتم استبدال بيانات هذا الجهاز ببيانات السحابة. متأكد؟')) return;
     if(!(await bk())) return;
     try{ localStorage.setItem('amjad_students_before_cloud',JSON.stringify(students)); }catch(e){}
-    students=cloud; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(x=>x.id));
+    students=cloud; localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',students.map(x=>x.id)); rebaseTo(cloud);
     ov.remove(); render(); toast('✅ تم اعتماد السحابة');
   };
 }
