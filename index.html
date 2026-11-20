@@ -300,7 +300,12 @@ async function syncStudentsToCloud(){
       let known=[]; try{ known=JSON.parse(localStorage.getItem('amjad_known_students')||'[]'); }catch(e){}
       const ks=new Set(known); const mine=students.filter(x=>ks.has(x.id));
       if(mine.length!==students.length){ students=mine; localStorage.setItem('amjad_students',JSON.stringify(students)); }
-      const dset=new Set(dirtyStudents().map(x=>x.id)); const rs=await Promise.all(mine.filter(x=>dset.has(x.id)).map(x=>{ const c=Object.assign({},x); delete c.id; delete c.family_id; delete c.stage; delete c.grade; return supabaseClient.from('students').update(c).eq('id',x.id); }));
+      let dl=dirtyStudents().filter(x=>ks.has(x.id));
+      if(dl.length){ const base=getBase()||{}; const cr=await supabaseClient.rpc('get_students'); if(cr.error) throw cr.error;
+        const cm=new Map((cr.data||[]).map(migrateStudent).map(x=>[x.id,x])); const conf=[];
+        dl=dl.filter(d=>{ const c=cm.get(d.id); if(c&&base[d.id]!==undefined&&sigOf(c)!==base[d.id]){ conf.push(d); return false; } return true; });
+        if(conf.length){ const nb=getBase()||{}; conf.forEach(d=>{ const c=cm.get(d.id); const i=students.findIndex(x=>x.id===d.id); if(i>=0) students[i]=c; nb[d.id]=sigOf(c); }); setBase(nb); try{ localStorage.setItem('amjad_students',JSON.stringify(students)); }catch(e){} toast('⚠️ عُدّل '+conf.map(x=>x.name).slice(0,3).join('، ')+' من جهاز آخر — حُدِّث من السحابة'); render(); } }
+      const dset=new Set(dl.map(x=>x.id)); const rs=await Promise.all(mine.filter(x=>dset.has(x.id)).map(x=>{ const c=Object.assign({},x); delete c.id; delete c.family_id; delete c.stage; delete c.grade; return supabaseClient.from('students').update(c).eq('id',x.id); }));
       const bad=rs.find(r=>r.error); if(bad) throw bad.error; { const nb=getBase()||{}; mine.forEach(x=>{ if(dset.has(x.id)) nb[x.id]=sigOf(x); }); setBase(nb); }
     } // family_id يُدار من شاشة الأسر فقط، ولا يُرسل من نسخة الجهاز
     await flushDeletes('students',true);
@@ -3518,7 +3523,7 @@ async function refreshFromCloud(manual){
   await loadFromCloud({pull:true});
   if(manual&&typeof toast==='function') toast(cloudOnline?'✅ تم تحديث البيانات':'⚠️ تعذر التحديث');
 }
-setInterval(()=>refreshFromCloud(false),60000);
+setInterval(()=>refreshFromCloud(false),30000);
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) refreshFromCloud(false); });
 window.addEventListener('online',()=>refreshFromCloud(false));
 window.addEventListener('focus',()=>refreshFromCloud(false));
