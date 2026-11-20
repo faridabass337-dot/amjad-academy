@@ -309,11 +309,50 @@ async function syncStudentsToCloud(){
   }catch(e){ cloudOnline=false; setSyncErr('sync students',e); console.error('sync students failed, remote untouched',e); }
   updateCloudStatus();
 }
+// ---------- نفس نظام التعديل المتزامن للمعاملات والمعلمين والحجوزات ----------
+const COLL={
+  transactions:{get:()=>transactions,set:v=>{transactions=v;},key:'amjad_transactions',table:'transactions',soft:false,fetch:async()=>{ const r=await supabaseClient.from('transactions').select('*'); return r; },label:x=>x.id},
+  teachers:{get:()=>teachers,set:v=>{teachers=v;},key:'amjad_teachers',table:'teachers',soft:true,fetch:async()=>await supabaseClient.rpc('get_teachers'),label:x=>x.name||x.id},
+  bookings:{get:()=>bookings,set:v=>{bookings=v;},key:'amjad_bookings',table:'bookings',soft:false,fetch:async()=>await supabaseClient.from('bookings').select('*'),label:x=>x.name||x.id}
+};
+function cGetBase(k){ try{ return JSON.parse(localStorage.getItem('amjad_base_'+k)||'null'); }catch(e){ return null; } }
+function cSetBase(k,o){ try{ localStorage.setItem('amjad_base_'+k,JSON.stringify(o)); }catch(e){} }
+function cPdel(k){ try{ return new Set(JSON.parse(localStorage.getItem('amjad_pdel_'+k)||'[]')); }catch(e){ return new Set(); } }
+function cDirty(k){ const b=cGetBase(k)||{}; return COLL[k].get().filter(x=>b[x.id]===undefined||sigOf(x)!==b[x.id]); }
+function cMerge(k,cloud){
+  const C=COLL[k]; const local=C.get(); const base=cGetBase(k); const pdel=cPdel(k);
+  if(!base){
+    try{ localStorage.setItem('amjad_'+k+'_prerebase',JSON.stringify(local)); }catch(e){}
+    let known=[]; try{ known=JSON.parse(localStorage.getItem('amjad_known_'+k)||'[]'); }catch(e){}
+    const extra=local.filter(l=>!cloud.some(c=>c.id===l.id)&&!known.includes(l.id));
+    const nb={}; cloud.forEach(c=>{ nb[c.id]=sigOf(c); }); cSetBase(k,nb);
+    return cloud.filter(c=>!pdel.has(c.id)).concat(extra);
+  }
+  const lm=new Map(local.map(x=>[x.id,x])), cm=new Map(cloud.map(x=>[x.id,x])); const out=[]; const nb=Object.assign({},base);
+  cloud.forEach(c=>{ if(pdel.has(c.id)) return; const l=lm.get(c.id);
+    if(l&&base[c.id]!==undefined&&sigOf(l)!==base[c.id]) out.push(l); else { out.push(c); nb[c.id]=sigOf(c); } });
+  local.forEach(l=>{ if(cm.has(l.id)) return; if(base[l.id]===undefined) out.push(l); else delete nb[l.id]; });
+  cSetBase(k,nb); return out;
+}
+async function cSync(k){
+  const C=COLL[k]; if(!isAdmin()&&k!=='bookings') return; let dirty=cDirty(k);
+  if(dirty.length){
+    const base=cGetBase(k)||{}; const cr=await C.fetch(); if(cr.error) throw cr.error;
+    const cm=new Map((cr.data||[]).map(x=>[x.id,x])); const conflicts=[];
+    dirty=dirty.filter(d=>{ const c=cm.get(d.id); if(c&&base[d.id]!==undefined&&sigOf(c)!==base[d.id]){ conflicts.push(d); return false; } return true; });
+    if(conflicts.length){ const nb=cGetBase(k)||{}; const arr=C.get().slice();
+      conflicts.forEach(d=>{ const c=cm.get(d.id); const i=arr.findIndex(x=>x.id===d.id); if(i>=0) arr[i]=c; nb[d.id]=sigOf(c); });
+      C.set(arr); cSetBase(k,nb); try{ localStorage.setItem(C.key,JSON.stringify(arr)); }catch(e){}
+      toast('⚠️ عُدّل '+conflicts.map(C.label).slice(0,3).join('، ')+' من جهاز آخر — حُدِّث من السحابة'); render(); }
+    if(dirty.length){ const {error}=await supabaseClient.from(C.table).upsert(dirty,{onConflict:'id'}); if(error) throw error;
+      const nb=cGetBase(k)||{}; dirty.forEach(d=>{ nb[d.id]=sigOf(d); }); cSetBase(k,nb); }
+  }
+  await flushDeletes(C.table,C.soft);
+}
 async function syncTransactionsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
-    if(transactions.length){ const {error}=await supabaseClient.from('transactions').upsert(transactions,{onConflict:'id'}); if(error)throw error; }
-    await flushDeletes('transactions',false);
+    await cSync('transactions');
     cloudOnline=true;
   }catch(e){ cloudOnline=false; setSyncErr('sync tx',e); console.error('sync tx failed',e); }
   updateCloudStatus();
@@ -321,8 +360,7 @@ async function syncTransactionsToCloud(){
 async function syncTeachersToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
-    if(teachers.length){ const {error}=await supabaseClient.from('teachers').upsert(teachers,{onConflict:'id'}); if(error)throw error; }
-    await flushDeletes('teachers',true);
+    await cSync('teachers');
     cloudOnline=true;
   }catch(e){ cloudOnline=false; setSyncErr('sync teachers',e); console.error('sync teachers failed',e); }
   updateCloudStatus();
@@ -335,8 +373,7 @@ function saveBookings(){
 async function syncBookingsToCloud(){
   if(!supabaseClient){cloudOnline=false;updateCloudStatus();return;}
   try{
-    if(bookings.length){ const {error}=await supabaseClient.from('bookings').upsert(bookings,{onConflict:'id'}); if(error)throw error; }
-    await flushDeletes('bookings',false);
+    await cSync('bookings');
     cloudOnline=true;
   }catch(e){ cloudOnline=false; setSyncErr('sync bookings',e); console.error('sync bookings failed',e); }
   updateCloudStatus();
@@ -364,22 +401,18 @@ async function loadFromCloudInner(pull){
     const cloudBookings=br.error?null:(br.data||[]);
     let needsResync=false;
     students=mergeStudents(cloudStudents); localStorage.setItem('amjad_students',JSON.stringify(students)); setKnown('students',cloudStudents.map(s=>s.id));
-    // Non-admin users are DB-restricted from reading financial tables (transactions) — a shorter/empty
-    // result for them is correct permission filtering, not data loss, so never fall back to stale local cache.
-    if(!isAdmin()){
-      transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',[]);
-    } else if(cloudTx.length<transactions.length){needsResync=true;} else {transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',transactions.map(t=>t.id));}
+    // المستخدم غير المدير لا يرى جدول المعاملات (صلاحيات القاعدة)؛ يأخذ ما تعيده السحابة كما هو.
+    if(!isAdmin()){ transactions=cloudTx; localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',[]); }
+    else { transactions=cMerge('transactions',cloudTx); localStorage.setItem('amjad_transactions',JSON.stringify(transactions)); setKnown('transactions',cloudTx.map(t=>t.id)); }
     if(cloudTeachers!==null){
       if(!isAdmin()){ teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); setKnown('teachers',teachers.map(t=>t.id)); }
-      else if(cloudTeachers.length<teachers.length){needsResync=true;} else {teachers=cloudTeachers; localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); setKnown('teachers',teachers.map(t=>t.id));}
+      else { teachers=cMerge('teachers',cloudTeachers); localStorage.setItem('amjad_teachers',JSON.stringify(teachers)); setKnown('teachers',cloudTeachers.map(t=>t.id)); }
     }
-    if(cloudBookings!==null){ if(cloudBookings.length<bookings.length){needsResync=true;} else {bookings=cloudBookings; localStorage.setItem('amjad_bookings',JSON.stringify(bookings)); setKnown('bookings',bookings.map(b=>b.id));} }
+    if(cloudBookings!==null){ bookings=cMerge('bookings',cloudBookings); localStorage.setItem('amjad_bookings',JSON.stringify(bookings)); setKnown('bookings',cloudBookings.map(b=>b.id)); }
     cloudOnline=true;
     if(!sr.error) lastCloudSyncAt=new Date();
-    if(pull) divergeFlag=needsResync;
-    if(pull) needsResync=false; // refresh never pushes local data up; only the startup load reconciles
-    if(needsResync && isAdmin()){ await Promise.all([syncStudentsToCloud(),syncTransactionsToCloud(),syncTeachersToCloud(),syncBookingsToCloud()]); }
-    if(!pull||dirtyStudents().length){ try{ if(dirtyStudents().length) await syncStudentsToCloud(); }catch(e){} }
+    divergeFlag=false;
+    { const jobs=[]; if(dirtyStudents().length) jobs.push(syncStudentsToCloud()); if(isAdmin()&&cDirty('transactions').length) jobs.push(syncTransactionsToCloud()); if(isAdmin()&&cDirty('teachers').length) jobs.push(syncTeachersToCloud()); if(cDirty('bookings').length) jobs.push(syncBookingsToCloud()); try{ await Promise.all(jobs); }catch(e){} }
     mirrorDirty();
     if(isAdmin()) supabaseClient.rpc('ensure_daily_backup').then(r=>{ if(r.error) console.error('daily backup',r.error); });
   }catch(e){ cloudOnline=false; setSyncErr('cloud load',e); console.error('cloud load failed',e); }
@@ -3522,6 +3555,7 @@ async function loadCurrentUserProfile(){
     localStorage.removeItem('amjad_teachers');
     localStorage.removeItem('amjad_bookings');
     students=[]; transactions=[]; teachers=[]; bookings=[];
+    ['amjad_base_sigs','amjad_base_transactions','amjad_base_teachers','amjad_base_bookings'].forEach(k=>localStorage.removeItem(k));
     localStorage.setItem('amjad_last_uid', currentUser.id);
   }
   return true;
